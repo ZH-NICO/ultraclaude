@@ -625,6 +625,7 @@ function ensureTerm(a) {
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
   term.onData((d) => ws?.readyState === 1 && ws.send(JSON.stringify({ t: 'in', id: a.id, d })));
+  term.attachCustomKeyEventHandler((ev) => terminalKeys(ev, term, a.id));
   term.onResize(({ cols, rows: r }) => ws?.readyState === 1 && ws.send(JSON.stringify({ t: 'resize', id: a.id, cols, rows: r })));
   const t = { term, fit, opened: false, dot: h('i'), nm: h('span', { class: 'nm' }), meta: h('span', { class: 'meta' }) };
   t.toggle = h('button', { type: 'button', class: 'link', onclick: guard(() => {
@@ -644,6 +645,32 @@ function ensureTerm(a) {
   $('terms').append(t.pane);
   terms.set(a.id, t);
   return t;
+}
+
+/**
+ * Keys that should behave like in Windows Terminal rather than how xterm.js handles them by default.
+ * Returning false hands the key back to the browser (so paste and copy happen natively); returning
+ * true lets the terminal send it to Claude Code as usual.
+ */
+function terminalKeys(ev, term, id) {
+  if (ev.type !== 'keydown') return true;
+  const key = ev.key.toLowerCase();
+  const ctrl = ev.ctrlKey && !ev.altKey && !ev.metaKey;
+  // Ctrl+V / Ctrl+Shift+V: paste. xterm.js would send ^V and swallow the paste, so neither text nor
+  // images arrived. Text now goes in as a normal paste, images through pasteImage().
+  if (ctrl && key === 'v') return false;
+  // Ctrl+C copies when something is selected, otherwise it interrupts Claude as usual. Ctrl+Shift+C always copies.
+  if (ctrl && key === 'c' && (ev.shiftKey || term.hasSelection())) {
+    setTimeout(() => term.clearSelection(), 0);
+    return false;
+  }
+  // Shift+Enter / Ctrl+Enter: a new line in the prompt instead of sending it (Claude Code reads ESC CR as that)
+  if (ev.key === 'Enter' && (ev.shiftKey || ev.ctrlKey) && !ev.altKey && !ev.metaKey) {
+    ev.preventDefault();
+    if (ws?.readyState === 1) ws.send(JSON.stringify({ t: 'in', id, d: '\x1b\r' }));
+    return false;
+  }
+  return true;
 }
 
 /**
