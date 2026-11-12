@@ -212,7 +212,16 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const arg = (name) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : undefined; };
-  const app = await startServer({ dir: arg('--dir') || process.cwd(), autoExit: true });
-  console.log(`UltraClaude server for ${app.project.dir} on ${app.url}`);
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => app.close().then(() => process.exit(0)));
+  if (process.platform === 'win32' && process.argv.includes('--background') && !process.argv.includes('--has-console')) {
+    // Started in the background, this process has no console at all. On Windows every helper
+    // it launches (where.exe, node-pty's process lister) would then pop up its own terminal
+    // window for a moment. So run the real server as a child that owns one hidden console,
+    // which all of its helpers inherit.
+    const child = spawn(process.execPath, [...process.argv.slice(1), '--has-console'], { stdio: 'inherit', windowsHide: true });
+    child.on('exit', (code) => process.exit(code ?? 0));
+  } else {
+    const app = await startServer({ dir: arg('--dir') || process.cwd(), autoExit: true });
+    console.log(`UltraClaude server for ${app.project.dir} on ${app.url}`);
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => app.close().then(() => process.exit(0)));
+  }
 }

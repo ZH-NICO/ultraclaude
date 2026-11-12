@@ -59,7 +59,7 @@ async function open() {
     fs.mkdirSync(dataDir, { recursive: true });
     try { fs.unlinkSync(infoFile); } catch { /* no stale file */ }
     const log = fs.openSync(path.join(dataDir, 'server.log'), 'a');
-    spawn(process.execPath, [SERVER, '--dir', dir], { detached: true, stdio: ['ignore', log, log], windowsHide: true, cwd: dir }).unref();
+    spawn(process.execPath, [SERVER, '--dir', dir, '--background'], { detached: true, stdio: ['ignore', log, log], windowsHide: true, cwd: dir }).unref();
     for (let i = 0; i < 60 && !info; i++) {
       await new Promise((r) => setTimeout(r, 250));
       info = await running();

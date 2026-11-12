@@ -17,16 +17,20 @@ const TASK_LABEL = { todo: 'open', in_progress: 'in progress', done: 'done' };
 const RESERVED_NAMES = ['user', 'you', 'all', 'everyone'];
 const BROADCAST = ['all', 'everyone', '*'];
 
-/** Path of the Claude Code executable, or null when it is not installed. */
+let claudePath = null;
+
+/** Path of the Claude Code executable, or null when it is not installed. Looked up once, then remembered. */
 function resolveClaude() {
   if (process.env.ULTRACLAUDE_CLAUDE) return process.env.ULTRACLAUDE_CLAUDE;
+  if (claudePath && fs.existsSync(claudePath)) return claudePath;
   try {
-    const out = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    const out = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
     const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    return lines.find((l) => /\.exe$/i.test(l)) || lines.find((l) => /\.cmd$/i.test(l)) || lines[0] || null;
+    claudePath = lines.find((l) => /\.exe$/i.test(l)) || lines.find((l) => /\.cmd$/i.test(l)) || lines[0] || null;
   } catch {
-    return null;
+    claudePath = null;
   }
+  return claudePath;
 }
 
 const base = (f) => (f ? String(f).split(/[\\/]/).pop() : '');
