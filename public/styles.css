@@ -174,16 +174,19 @@ main { flex: 1; display: flex; min-width: 0; min-height: 0; }
 .composer.inline select { max-width: 170px; }
 
 /* ---------- terminals ---------- */
-#terms { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+#terms { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
 #terms.grid { grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); grid-auto-rows: minmax(280px, 1fr); overflow-y: auto; }
-.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 #terms.grid .pane { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .pane-head { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line); }
 .pane-head .nm { font-weight: 600; white-space: nowrap; }
 .pane-head .meta { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pane.waiting .meta { color: var(--waiting); }
 .pane-head .link { padding: 4px 6px; }
-.pane-body { position: relative; flex: 1; min-height: 0; padding: 8px 0 0 12px; background: var(--term); }
+/* The terminal is laid over the box, never inside its flow: its own size can then not change the box
+   it is fitted to, which is what made terminals resize in an endless loop. */
+.pane-body { position: relative; flex: 1; min-height: 0; overflow: hidden; padding: 8px 0 0 12px; background: var(--term); }
+.pane-body .xterm { position: absolute; top: 8px; left: 12px; right: 0; bottom: 0; }
 .pane-body .xterm-viewport { scrollbar-width: thin; scrollbar-color: #373d44 transparent; }
 .pane-off { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--term) 88%, transparent); color: #a0a6ad; }
 

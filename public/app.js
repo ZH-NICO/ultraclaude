@@ -312,9 +312,14 @@ function ensureTerm(a) {
   return t;
 }
 
+// Fits are bundled and only run once the box has settled, so a terminal keeps its size
+// instead of being resized again and again while the layout is still moving.
 function fitTerm(t) {
-  if (!t.opened || !t.body.clientWidth || !t.body.clientHeight) return;
-  try { t.fit.fit(); } catch { /* not measurable yet */ }
+  clearTimeout(t.fitTimer);
+  t.fitTimer = setTimeout(() => {
+    if (!t.opened || !t.body.clientWidth || !t.body.clientHeight) return;
+    try { t.fit.fit(); } catch { /* not measurable yet */ }
+  }, 120);
 }
 
 function layoutTerms() {
