@@ -5,7 +5,7 @@ const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, sessions: [], allSessions: false, picked: new Set(), hidden: new Set(), only: null, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
+const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, sessions: [], allSessions: false, picked: new Set(), hidden: new Set(), only: null, tree: [], open: new Set(), openSeeded: false, projectRel: '', folder: null, editing: false, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
 let ws;
 let halted = false;
 
@@ -551,30 +551,179 @@ function renderTasks() {
 
 // ---------- memory ----------
 
-const GROUPS = [['Memory', 'Project memory'], ['Global', 'Global memory'], ['Claude Code', 'From Claude Code'], ['Tasks', 'Board'], ['Agents', 'Agents'], ['Log', 'Journal'], ['Project', 'Project'], ['Vault', 'Other']];
+// The vault's real folder structure on the left; on the right a note to read and edit, a folder,
+// or the editor for a new note.
 let vaultInfo;
+const nodeAt = (nodes, p) => { for (const n of nodes) { if (n.path === p) return n; const hit = n.children && nodeAt(n.children, p); if (hit) return hit; } return null; };
+const filesIn = (nodes) => nodes.flatMap((n) => (n.type === 'dir' ? filesIn(n.children) : [n]));
+const foldersIn = (nodes) => nodes.flatMap((n) => (n.type === 'dir' ? [n, ...foldersIn(n.children)] : []));
+const parentOf = (p) => p.split('/').slice(0, -1).join('/');
+const baseName = (p) => p.split('/').pop().replace(/\.md$/i, '');
 
 async function loadNotes() {
-  try { S.notes = await api('GET', '/api/notes'); } catch { return; }
+  try {
+    const [t, notes] = await Promise.all([api('GET', '/api/tree'), api('GET', '/api/notes')]);
+    Object.assign(S, { tree: t.tree, projectRel: t.project, notes });
+  } catch { return; }
+  if (!S.openSeeded) {
+    S.openSeeded = true;
+    for (const p of ['Projects', S.projectRel, `${S.projectRel}/Memory`, 'Global']) S.open.add(p);
+  }
   S.noteCount = S.notes.filter((n) => ['Memory', 'Global', 'Claude Code'].includes(n.kind)).length;
   renderNotes();
   syncSide();
+  // what is shown on the right may have been moved or deleted meanwhile, by you or an agent
+  if (!S.editing && ((S.note && !nodeAt(S.tree, S.note)) || (S.folder && !nodeAt(S.tree, S.folder)))) showVaultInfo();
 }
 
 function renderNotes() {
   const q = $('noteFilter').value.trim().toLowerCase();
-  const out = [];
-  for (const [kind, label] of GROUPS) {
-    const notes = S.notes.filter((n) => (GROUPS.some(([k]) => k === n.kind) ? n.kind : 'Vault') === kind
-      && (!q || `${n.title} ${n.excerpt} ${n.tags.join(' ')}`.toLowerCase().includes(q)));
-    if (!notes.length) continue;
-    out.push(h('h3', {}, label));
-    for (const n of notes) {
-      out.push(h('button', { type: 'button', class: `note ${S.note === n.path ? 'active' : ''}`, onclick: () => openNote(n.path) },
-        h('b', {}, n.title), h('span', {}, [n.updated, ...n.authors].join(' · '))));
-    }
+  if (q) {
+    const text = new Map(S.notes.map((n) => [n.path, `${n.excerpt} ${n.tags.join(' ')}`.toLowerCase()]));
+    const hits = filesIn(S.tree).filter((f) => f.path.toLowerCase().includes(q) || text.get(f.path)?.includes(q));
+    $('noteList').replaceChildren(...(hits.length ? hits.map((f) => fileRow(f, 0, true)) : [h('p', { class: 'none' }, 'No matches.')]));
+    return;
   }
-  $('noteList').replaceChildren(...(out.length ? out : [h('p', { class: 'none' }, q ? 'No matches.' : 'No notes yet. Your agents add them as they work.')]));
+  const rows = treeRows(S.tree, 0);
+  $('noteList').replaceChildren(...(rows.length ? rows : [h('p', { class: 'none' }, 'The vault is empty.')]));
+}
+
+const indent = (depth) => `padding-left:${8 + depth * 14}px`;
+const treeRows = (nodes, depth) => nodes.flatMap((n) => (n.type === 'dir'
+  ? [dirRow(n, depth), ...(S.open.has(n.path) ? treeRows(n.children, depth + 1) : [])]
+  : [fileRow(n, depth)]));
+
+function dirRow(n, depth) {
+  const open = S.open.has(n.path);
+  const count = filesIn(n.children).length;
+  return h('button', {
+    type: 'button', class: `tnode dir${S.folder === n.path ? ' active' : ''}`, style: indent(depth), title: n.path, 'aria-expanded': String(open),
+    onclick: () => { if (open && S.folder === n.path) S.open.delete(n.path); else S.open.add(n.path); showFolder(n.path); },
+  }, h('span', { class: 'caret' }, open ? '▾' : '▸'), h('span', { class: 'nm' }, n.name), h('span', { class: 'cnt' }, count ? String(count) : ''));
+}
+
+function fileRow(n, depth, withFolder = false) {
+  return h('button', { type: 'button', class: `tnode note${S.note === n.path ? ' active' : ''}`, style: indent(depth), title: n.path, onclick: () => openNote(n.path) },
+    h('span', { class: 'caret' }), h('span', { class: 'fn' }, h('b', {}, n.name), withFolder ? h('span', { class: 'sub' }, parentOf(n.path) || 'Vault') : null));
+}
+
+function showVaultInfo() {
+  Object.assign(S, { note: null, folder: null, editing: false });
+  $('noteView').replaceChildren(vaultInfo);
+  renderNotes();
+}
+
+async function copyText(text, what) {
+  try { await navigator.clipboard.writeText(text); toast(`${what} copied`); } catch { toast(`Could not copy the ${what.toLowerCase()}`, 'error'); }
+}
+const fullPath = (rel) => {
+  const root = S.project.vault;
+  const sep = root.includes('\\') ? '\\' : '/';
+  return rel ? `${root}${sep}${rel.split('/').join(sep)}` : root;
+};
+
+/** Lets the person type a new path for a note or folder: rename and move in one. */
+function renameForm(item, isFile) {
+  const input = h('input', { value: isFile ? item.replace(/\.md$/i, '') : item, 'aria-label': 'New name and folder', spellcheck: 'false' });
+  const save = guard(async () => {
+    const r = await api('POST', '/api/file/move', { from: item, to: input.value.trim() });
+    await loadNotes();
+    if (isFile) openNote(r.path); else { S.open.add(r.path); showFolder(r.path); }
+  });
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') form.replaceWith(form.backup); });
+  const form = h('div', { class: 'inline-form' }, input, h('button', { type: 'button', class: 'btn', onclick: save }, 'Save'),
+    h('button', { type: 'button', class: 'link', onclick: () => form.replaceWith(form.backup) }, 'Cancel'));
+  return form;
+}
+
+function showFolder(p) {
+  const n = nodeAt(S.tree, p);
+  if (!n) return showVaultInfo();
+  Object.assign(S, { folder: p, note: null, editing: false });
+  const files = n.children.filter((c) => c.type === 'file');
+  const actions = h('div', { class: 'note-actions' },
+    n.readOnly ? null : h('button', { type: 'button', class: 'link', onclick: () => newNote(p) }, 'New note here'),
+    n.readOnly ? null : h('button', { type: 'button', class: 'link', onclick: () => newFolder(p) }, 'New folder here'),
+    n.readOnly ? null : h('button', { type: 'button', class: 'link', onclick: () => { const f = renameForm(p, false); f.backup = actions; actions.replaceWith(f); f.querySelector('input').focus(); } }, 'Rename or move'),
+    h('button', { type: 'button', class: 'link', onclick: () => copyText(fullPath(p), 'Path') }, 'Copy path'),
+    n.readOnly || n.children.length ? null : h('button', { type: 'button', class: 'link danger', onclick: guard(async () => {
+      if (!confirm(`Delete the empty folder “${n.name}”?`)) return;
+      await api('DELETE', `/api/file?path=${encodeURIComponent(p)}`);
+      await loadNotes();
+      p.includes('/') ? showFolder(parentOf(p)) : showVaultInfo();
+    }) }, 'Delete'));
+  $('noteView').replaceChildren(
+    h('div', { class: 'note-meta' }, h('button', { type: 'button', class: 'link', onclick: showVaultInfo }, '← Memory'), h('span', {}, p)),
+    actions,
+    h('div', { class: 'doc' },
+      h('h1', {}, n.name),
+      n.readOnly ? h('p', { class: 'hint' }, 'UltraClaude keeps this folder up to date itself. You can read and copy what is here.') : null,
+      h('p', {}, `${plural(files.length, 'note')}, ${plural(n.children.length - files.length, 'folder')}.`),
+      files.length ? h('ul', {}, files.map((f) => h('li', {}, h('a', { onclick: () => openNote(f.path) }, f.name)))) : null));
+  $('noteView').scrollTop = 0;
+  renderNotes();
+}
+
+/** The editor, for a new note (folder given) or an existing one (path and its current text given). */
+function showEditor({ folder = null, path = null, content = '' }) {
+  S.editing = true;
+  const isNew = !path;
+  const folders = foldersIn(S.tree).filter((d) => !d.readOnly);
+  const where = isNew ? h('select', { 'aria-label': 'Folder' }, h('option', { value: '' }, 'Vault (top level)'), folders.map((d) => h('option', { value: d.path }, d.path))) : null;
+  if (where) where.value = folders.some((d) => d.path === folder) ? folder : '';
+  const name = isNew ? h('input', { placeholder: 'Name of the note', 'aria-label': 'Name of the note', spellcheck: 'false' }) : null;
+  const text = h('textarea', { spellcheck: 'false', 'aria-label': 'Note text', placeholder: 'What should every agent know? Markdown works, and [[Note name]] links to another note.' });
+  text.value = content;
+  const original = content;
+  const close = () => { S.editing = false; if (isNew) (folder ? showFolder(folder) : showVaultInfo()); else openNote(path); };
+  const save = guard(async () => {
+    if (isNew) {
+      const title = name.value.trim();
+      if (!title) { name.focus(); return toast('Give the note a name.', 'waiting'); }
+      const r = await api('POST', '/api/file', { path: where.value ? `${where.value}/${title}` : title, content: text.value.trim() ? text.value : `# ${title}\n` });
+      S.editing = false;
+      S.open.add(parentOf(r.path));
+      await loadNotes();
+      return openNote(r.path);
+    }
+    await api('PUT', '/api/file', { path, content: text.value });
+    S.editing = false;
+    await loadNotes();
+    openNote(path);
+  });
+  const cancel = () => { if (text.value !== original && !confirm('Discard your changes?')) return; close(); };
+  text.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); save(); }
+    if (ev.key === 'Escape') cancel();
+  });
+  $('noteView').replaceChildren(h('div', { class: 'editor' },
+    h('div', { class: 'note-meta' }, h('span', {}, isNew ? 'New note' : `Editing ${path}`), h('span', {}, 'Ctrl+S saves · Esc cancels')),
+    isNew ? h('div', { class: 'row' }, where, name) : null,
+    text,
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onclick: save }, 'Save'), h('button', { type: 'button', class: 'btn', onclick: cancel }, 'Cancel'))));
+  (isNew ? name : text).focus();
+  renderNotes();
+}
+
+const newNote = (folder) => showEditor({ folder: folder ?? S.folder ?? (S.note ? parentOf(S.note) : `${S.projectRel}/Memory`) });
+
+function newFolder(inFolder) {
+  const parent = inFolder ?? S.folder ?? (S.note ? parentOf(S.note) : `${S.projectRel}/Memory`);
+  const input = h('input', { placeholder: 'Name of the new folder', 'aria-label': 'Name of the new folder', spellcheck: 'false' });
+  const save = guard(async () => {
+    const r = await api('POST', '/api/folder', { path: parent ? `${parent}/${input.value.trim()}` : input.value.trim() });
+    S.open.add(parent);
+    S.open.add(r.path);
+    await loadNotes();
+    showFolder(r.path);
+  });
+  input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); if (ev.key === 'Escape') showFolder(parent); });
+  Object.assign(S, { folder: parent, note: null, editing: false });
+  $('noteView').replaceChildren(h('div', { class: 'editor' },
+    h('div', { class: 'note-meta' }, h('span', {}, `New folder in ${parent || 'the vault'}`)),
+    h('div', { class: 'row' }, input, h('button', { type: 'button', class: 'btn primary', onclick: save }, 'Create'), h('button', { type: 'button', class: 'link', onclick: () => (parent ? showFolder(parent) : showVaultInfo()) }, 'Cancel'))));
+  input.focus();
+  renderNotes();
 }
 
 function inline(text) {
@@ -602,8 +751,13 @@ function markdown(src) {
     if (code) { code.push(line); continue; }
     const head = /^(#{1,6})\s+(.*)$/.exec(line);
     const item = /^\s*[-*]\s+(.*)$/.exec(line);
+    const num = /^\s*\d+[.)]\s+(.*)$/.exec(line);
     if (head) { out.push(h(`h${Math.min(3, head[1].length + 1)}`, {}, inline(head[2]))); list = null; }
-    else if (item) { if (!list) { list = h('ul'); out.push(list); } list.append(h('li', {}, inline(item[1]))); }
+    else if (item || num) {
+      const tag = item ? 'ul' : 'ol';
+      if (list?.tagName.toLowerCase() !== tag) { list = h(tag); out.push(list); }
+      list.append(h('li', {}, inline((item || num)[1])));
+    }
     else if (line.trim()) { out.push(h('p', {}, inline(line))); list = null; }
     else list = null;
   }
@@ -613,14 +767,36 @@ function markdown(src) {
 
 const openNote = guard(async (ref) => {
   const n = await api('GET', `/api/note?path=${encodeURIComponent(ref)}`);
-  S.note = n.path;
-  $('noteView').replaceChildren(
+  Object.assign(S, { note: n.path, folder: null, editing: false });
+  for (let p = parentOf(n.path); p; p = parentOf(p)) S.open.add(p); // show where it lives
+  const readOnly = nodeAt(S.tree, n.path)?.readOnly;
+  const actions = h('div', { class: 'note-actions' },
+    readOnly ? null : h('button', { type: 'button', class: 'link', onclick: guard(async () => showEditor({ path: n.path, content: (await api('GET', `/api/file?path=${encodeURIComponent(n.path)}`)).content })) }, 'Edit'),
+    readOnly ? null : h('button', { type: 'button', class: 'link', onclick: () => { const f = renameForm(n.path, true); f.backup = actions; actions.replaceWith(f); f.querySelector('input').focus(); } }, 'Rename or move'),
+    h('button', { type: 'button', class: 'link', onclick: guard(async () => {
+      const r = await api('POST', '/api/file/copy', readOnly ? { from: n.path, to: `${S.projectRel}/Memory/${baseName(n.path)}` } : { from: n.path });
+      await loadNotes();
+      openNote(r.path);
+    }) }, readOnly ? 'Copy into Memory' : 'Duplicate'),
+    h('button', { type: 'button', class: 'link', onclick: () => copyText(n.body, 'Text') }, 'Copy text'),
+    h('button', { type: 'button', class: 'link', onclick: () => copyText(fullPath(n.path), 'Path') }, 'Copy path'),
+    h('button', { type: 'button', class: 'link', onclick: () => openInObsidian(n.path) }, 'Open in Obsidian'),
+    readOnly ? null : h('button', { type: 'button', class: 'link danger', onclick: guard(async () => {
+      if (!confirm(`Delete “${n.title}”? This cannot be undone.`)) return;
+      await api('DELETE', `/api/file?path=${encodeURIComponent(n.path)}`);
+      await loadNotes();
+      showFolder(parentOf(n.path));
+    }) }, 'Delete'));
+  $('noteView').replaceChildren(...[
     h('div', { class: 'note-meta' },
-      h('button', { type: 'button', class: 'link', onclick: () => { S.note = null; $('noteView').replaceChildren(vaultInfo); renderNotes(); } }, '← All notes'),
+      h('button', { type: 'button', class: 'link', onclick: showVaultInfo }, '← Memory'),
       h('span', {}, n.path), h('span', {}, `updated ${n.updated}`),
       n.authors.length ? h('span', {}, `by ${n.authors.join(', ')}`) : null,
       n.tags.length ? h('span', {}, n.tags.map((t) => `#${t}`).join(' ')) : null),
-    h('div', { class: 'doc' }, h('h1', {}, n.title), markdown(n.body)));
+    actions,
+    readOnly ? h('p', { class: 'hint' }, 'UltraClaude keeps this note up to date itself. To change it, copy it into Memory first.') : null,
+    h('div', { class: 'doc' }, h('h1', {}, n.title), markdown(n.body)),
+  ].filter(Boolean));
   $('noteView').scrollTop = 0;
   renderNotes();
 });
@@ -733,7 +909,7 @@ function connect() {
     else if (m.t === 'tasks') { S.tasks = m.tasks; renderTasks(); syncSide(); }
     else if (m.t === 'event') onEvent(m.e);
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
-    else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') loadNotes(); }
+    else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') loadNotes(); } // keeps an open editor as it is
   };
   ws.onclose = () => {
     if (halted) return;
@@ -774,6 +950,8 @@ $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder
 $('openFolder').addEventListener('click', guard(() => api('POST', '/api/open-vault-folder', {})));
+$('newNote').addEventListener('click', () => newNote());
+$('newFolder').addEventListener('click', () => newFolder());
 $('addAgent').addEventListener('click', () => {
   $('agentForm').reset();
   $('fName').setCustomValidity('');

@@ -129,13 +129,15 @@
         <h1>Memory</h1>
         <p class="sub mono" id="vaultPath"></p>
         <div class="head-actions">
+          <button type="button" class="btn primary" id="newNote">New note</button>
+          <button type="button" class="btn" id="newFolder">New folder</button>
           <button type="button" class="btn" id="openObsidian">Open in Obsidian</button>
           <button type="button" class="btn" id="openFolder">Open folder</button>
         </div>
       </header>
       <div class="memory">
         <aside class="notes">
-          <input id="noteFilter" placeholder="Filter notes" autocomplete="off" aria-label="Filter notes">
+          <input id="noteFilter" placeholder="Find a note" autocomplete="off" aria-label="Find a note">
           <div id="noteList"></div>
         </aside>
         <article id="noteView">

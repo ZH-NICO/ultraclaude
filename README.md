@@ -133,6 +133,12 @@ UltraClaudeVault/
 
 To see it in Obsidian, choose "Open folder as vault" and pick the vault folder. Notes you write yourself in `Memory/` or `Global/` are found by the agents too.
 
+You can also manage it right in UltraClaude. The **Memory** view shows the vault's real folders:
+- **New note** and **New folder** add your own.
+- On a note you can **Edit** it (Ctrl+S saves), **Rename or move** it, **Duplicate** it, **Copy text**, **Copy path**, open it in Obsidian or **Delete** it.
+- Folders can be renamed, moved, and deleted once they are empty.
+- `Agents/`, `Tasks/` and `Claude Code/` are kept up to date by UltraClaude itself, so they are read-only there. **Copy into Memory** makes an editable copy.
+
 ## Earlier sessions
 
 Already used Claude Code in a folder? UltraClaude picks that up the moment you open it there.

@@ -29,6 +29,9 @@ const cleanTags = (tags) =>
 const front = (meta) =>
   '---\n' + Object.entries(meta).map(([k, v]) => `${k}: ${Array.isArray(v) ? `[${v.join(', ')}]` : v}`).join('\n') + '\n---\n\n';
 
+/** Folders UltraClaude rewrites on its own: the agent notes, the board and the mirror of Claude Code's memory. */
+const READ_ONLY = /^Projects\/[^/]+\/(Agents|Tasks|Claude Code)(\/|$)/;
+
 /** The kinds of notes that count as knowledge: what agents search and what the note counter shows. */
 export const KNOWLEDGE = ['Memory', 'Global', 'Claude Code'];
 const SESSIONS_NOTE = 'Earlier sessions.md';
@@ -92,6 +95,123 @@ export class Vault {
     const p = path.resolve(this.root, String(rel));
     if (p !== this.root && !p.startsWith(this.root + path.sep)) throw new Error('Path is outside the vault');
     return p;
+  }
+
+  // ---------- files and folders, as the person sees them in the Memory view ----------
+
+  /** A vault-relative path the person typed, checked and normalised. Notes always end in .md. */
+  #clean(ref, file = false) {
+    let rel = String(ref ?? '').replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
+    const bad = (s) => !s || s !== s.trim() || s === '.' || s === '..' || s.startsWith('.') || /[<>:"|?*\x00-\x1f]/.test(s);
+    if (!rel || rel.split('/').some(bad)) throw new Error('That name cannot be used. Leave out < > : " | ? * and do not start a name with a dot.');
+    if (file && !/\.md$/i.test(rel)) rel += '.md';
+    this.abs(rel); // throws when the path leads outside the vault
+    return rel;
+  }
+
+  #writable(rel) {
+    if (READ_ONLY.test(rel)) throw new Error('UltraClaude keeps this folder up to date itself, so changes here would be overwritten. Duplicate the note into another folder to change it.');
+  }
+
+  /** The whole vault as folders and notes, folders first. Hidden folders (like .obsidian) are left out. */
+  tree() {
+    const walk = (abs, rel) => fs.readdirSync(abs, { withFileTypes: true })
+      .filter((e) => !e.name.startsWith('.'))
+      .map((e) => {
+        const p = rel ? `${rel}/${e.name}` : e.name;
+        if (e.isDirectory()) return { type: 'dir', name: e.name, path: p, readOnly: READ_ONLY.test(p), children: walk(path.join(abs, e.name), p) };
+        if (e.name.toLowerCase().endsWith('.md')) return { type: 'file', name: e.name.slice(0, -3), path: p, readOnly: READ_ONLY.test(p) };
+        return null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name, undefined, { numeric: true }) : a.type === 'dir' ? -1 : 1));
+    return walk(this.root, '');
+  }
+
+  readRaw(ref) {
+    const rel = this.#clean(ref, true);
+    const abs = this.abs(rel);
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw new Error('That note does not exist any more.');
+    return { path: rel, content: fs.readFileSync(abs, 'utf8'), readOnly: READ_ONLY.test(rel) };
+  }
+
+  /** Creates (create: true) or overwrites a note with exactly the text given, keeping its frontmatter current. */
+  saveRaw(ref, content, { create = false, author = 'user' } = {}) {
+    const rel = this.#clean(ref, true);
+    this.#writable(rel);
+    const abs = this.abs(rel);
+    const exists = fs.existsSync(abs);
+    if (create && exists) throw new Error(`There is already a note called “${path.basename(rel, '.md')}” in that folder.`);
+    if (!create && !exists) throw new Error('That note does not exist any more.');
+    let text = String(content ?? '');
+    const now = stamp();
+    const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(text);
+    if (m) {
+      const lines = m[1].split(/\r?\n/).map((l) => (l.startsWith('updated:') ? `updated: ${now}` : l));
+      text = `---\n${lines.join('\n')}\n---\n${text.slice(m[0].length)}`;
+    } else if (create) {
+      text = front({ created: now, updated: now, authors: [author] }) + text.replace(/^\s+/, '');
+    }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, text);
+    return { path: rel };
+  }
+
+  makeFolder(ref) {
+    const rel = this.#clean(ref);
+    this.#writable(rel);
+    if (fs.existsSync(this.abs(rel))) throw new Error('A folder or note with that name already exists.');
+    fs.mkdirSync(this.abs(rel), { recursive: true });
+    return { path: rel };
+  }
+
+  /** Renames or moves a note or a folder. */
+  move(from, to) {
+    const src = this.#clean(from);
+    const isFile = fs.existsSync(this.abs(src)) && fs.statSync(this.abs(src)).isFile();
+    if (!fs.existsSync(this.abs(src))) throw new Error('That note or folder does not exist any more.');
+    const dest = this.#clean(to, isFile);
+    this.#writable(src);
+    this.#writable(dest);
+    if (src === dest) return { path: dest };
+    if (!isFile && (dest + '/').startsWith(src + '/')) throw new Error('A folder cannot be moved into itself.');
+    if (fs.existsSync(this.abs(dest)) && src.toLowerCase() !== dest.toLowerCase()) throw new Error('Something with that name already exists there.');
+    fs.mkdirSync(path.dirname(this.abs(dest)), { recursive: true });
+    fs.renameSync(this.abs(src), this.abs(dest));
+    return { path: dest };
+  }
+
+  /** Copies a note. Without a target it goes next to the original as "<name> copy". */
+  copy(from, to) {
+    const src = this.#clean(from, true);
+    if (!fs.existsSync(this.abs(src))) throw new Error('That note does not exist any more.');
+    let dest = to ? this.#clean(to, true) : null;
+    if (!dest) {
+      const base = src.slice(0, -3);
+      dest = `${base} copy.md`;
+      for (let i = 2; fs.existsSync(this.abs(dest)); i++) dest = `${base} copy ${i}.md`;
+    }
+    this.#writable(dest);
+    if (fs.existsSync(this.abs(dest))) throw new Error('Something with that name already exists there.');
+    fs.mkdirSync(path.dirname(this.abs(dest)), { recursive: true });
+    fs.copyFileSync(this.abs(src), this.abs(dest));
+    return { path: dest };
+  }
+
+  /** Deletes a note, or a folder once it is empty. */
+  remove(ref) {
+    const rel = this.#clean(ref);
+    this.#writable(rel);
+    let abs = this.abs(rel);
+    if (!fs.existsSync(abs) && fs.existsSync(`${abs}.md`)) abs = `${abs}.md`;
+    if (!fs.existsSync(abs)) throw new Error('That note or folder does not exist any more.');
+    if (fs.statSync(abs).isDirectory()) {
+      if (fs.readdirSync(abs).length) throw new Error('Only empty folders can be deleted. Move or delete what is inside first.');
+      fs.rmdirSync(abs);
+    } else {
+      fs.rmSync(abs);
+    }
+    return { path: rel };
   }
 
   write({ title, content = '', tags = [], scope = 'project', author = 'user', mode = 'replace' }) {

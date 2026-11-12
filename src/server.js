@@ -123,7 +123,18 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       const file = project.pasteImage(paste[1], await readRaw(req, 25_000_000), req.headers['content-type']);
       return send(res, 200, { path: file });
     }
-    const body = ['POST', 'PATCH'].includes(req.method) ? await readBody(req) : {};
+    const body = ['POST', 'PATCH', 'PUT'].includes(req.method) ? await readBody(req) : {};
+    // files and folders of the vault, edited by the person in the Memory view
+    const changed = (text, extra = {}) => { project.emit('notes'); project.event('memory', 'user', text, { op: 'write', ...extra }); };
+    const label = (p) => `“${String(p).split('/').pop().replace(/\.md$/i, '')}”`;
+    if (route === 'GET /api/tree') return send(res, 200, { tree: project.vault.tree(), project: project.vault.rel(project.vault.projectDir) });
+    if (route === 'GET /api/file') return send(res, 200, project.vault.readRaw(url.searchParams.get('path')));
+    if (route === 'POST /api/file') { const r = project.vault.saveRaw(body.path, body.content, { create: true }); changed(`wrote ${label(r.path)} into memory`, { path: r.path }); return send(res, 200, r); }
+    if (route === 'PUT /api/file') { const r = project.vault.saveRaw(body.path, body.content); changed(`edited ${label(r.path)} in memory`, { path: r.path }); return send(res, 200, r); }
+    if (route === 'POST /api/file/move') { const r = project.vault.move(body.from, body.to); changed(`moved ${label(body.from)} to ${r.path}`, { path: r.path }); return send(res, 200, r); }
+    if (route === 'POST /api/file/copy') { const r = project.vault.copy(body.from, body.to); changed(`copied ${label(body.from)} to ${r.path}`, { path: r.path }); return send(res, 200, r); }
+    if (route === 'DELETE /api/file') { const r = project.vault.remove(url.searchParams.get('path')); changed(`deleted ${label(r.path)} from memory`); return send(res, 200, r); }
+    if (route === 'POST /api/folder') { const r = project.vault.makeFolder(body.path); changed(`made the folder ${r.path} in memory`); return send(res, 200, r); }
     const idMatch = /^\/api\/(agents|tasks)\/([^/]+)(?:\/(start|stop))?$/.exec(url.pathname);
 
     if (route === 'GET /api/state') {
