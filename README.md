@@ -96,7 +96,9 @@ Colour only ever means state: green is working, amber needs you. The window foll
 - **Select agents.** Tick the box in front of an agent in the sidebar. A bar appears with **Open together** (just those terminals side by side), **Stop** and **Remove** for the whole selection.
 - **Hide a terminal.** In All terminals every pane has a **−** next to Stop. It takes that terminal out of the view and leaves the agent running. A bar on top shows how many are hidden, with **Show all** to bring them back.
 - **Paste images with Ctrl+V.** Copy a screenshot or a picture and press Ctrl+V in an agent's terminal. The image is attached right away as `[Image #1]`, no file path needed. Text still pastes as usual.
+- **The prompt stays put.** Agents use Claude Code's fullscreen rendering: the prompt and status line stay at the bottom while you scroll the chat with the mouse wheel. To turn it off, set `"tui"` to something other than `"fullscreen"` in your Claude Code settings.
 - **Colours like a normal terminal.** Agents run with full colour, also when UltraClaude itself was started from a shell that has `NO_COLOR` set.
+- **Every chat on one map.** Click **ultraclaude** at the top left. Every Claude Code chat on your computer shows up as a dot: one row per folder, newest on the right, bigger dots for longer chats. Pick one to continue it here, or open its folder in its own UltraClaude window.
 
 ## Roles
 

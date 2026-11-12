@@ -1,7 +1,7 @@
 /* global Terminal, FitAddon */
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const $ = (id) => document.getElementById(id);
-const VIEWS = ['overview', 'agents', 'tasks', 'memory'];
+const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -70,6 +70,77 @@ function setView(view) {
   if (view === 'overview') { syncGraph(); $('feed').scrollTop = $('feed').scrollHeight; }
   if (view === 'agents') layoutTerms();
   if (view === 'memory') loadNotes();
+  if (view === 'map') loadChats();
+}
+
+// ---------- map of all chats ----------
+
+let chatData = null;
+let chatPick = null; // { key, id } of the chat shown on the right
+
+const loadChats = guard(async () => {
+  chatData = (await api('GET', '/api/chats')).projects;
+  if (!chatPick && chatData[0]) chatPick = { key: chatData[0].key, id: chatData[0].sessions[0].id };
+  renderMap();
+});
+
+const daysAgo = (ts) => Math.max(0, (Date.now() - ts) / 864e5);
+const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
+const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+function renderMap() {
+  if (!chatData) return;
+  const all = chatData.flatMap((pr) => pr.sessions);
+  setText($('mapSummary'), `${plural(all.length, 'chat')} in ${plural(chatData.length, 'folder')}`);
+  if (!all.length) {
+    $('mapAxis').replaceChildren();
+    $('mapRows').replaceChildren(h('p', { class: 'none' }, 'No Claude Code chats on this computer yet.'));
+    return renderChatDetail();
+  }
+  // Recent days get most of the width, older months are compressed: now on the right.
+  const span = Math.log1p(Math.max(7, ...all.map((s) => daysAgo(s.updated))));
+  const x = (days) => 100 - (Math.log1p(days) / span) * 100;
+  const ticks = [[0, 'now'], [1, '1 day'], [7, '1 week'], [30, '1 month'], [91, '3 months'], [365, '1 year'], [730, '2 years']].filter(([d]) => Math.log1p(d) <= span);
+  $('mapAxis').replaceChildren(h('span'), h('div', { class: 'track' }, ticks.map(([d, label]) => h('span', { class: 'tick', style: `left:${x(d)}%` }, label))));
+  const biggest = Math.max(...all.map((s) => s.size));
+  const q = $('mapFilter').value.trim().toLowerCase();
+  $('mapRows').replaceChildren(...chatData.map((pr) => h('div', { class: `map-row${pr.current ? ' current' : ''}` },
+    h('div', { class: 'lbl', title: pr.dir || pr.name }, h('b', {}, pr.name), h('span', {}, `${pr.current ? 'this folder · ' : ''}${plural(pr.sessions.length, 'chat')}`)),
+    h('div', { class: 'track' }, ticks.map(([d]) => h('i', { class: 'gl', style: `left:${x(d)}%` })), [...pr.sessions].reverse().map((s) => {
+      const size = Math.round(7 + 9 * Math.sqrt(s.size / biggest)); // 7–16 px, area follows the length of the chat
+      const hit = !q || `${s.title} ${s.firstPrompt} ${pr.name}`.toLowerCase().includes(q);
+      const sel = chatPick?.key === pr.key && chatPick.id === s.id;
+      return h('button', {
+        type: 'button', class: `chat${hit ? '' : ' dim'}${sel ? ' sel' : ''}`,
+        style: `left:${x(daysAgo(s.updated))}%;width:${size}px;height:${size}px`,
+        title: `${s.title}\n${pr.name} · ${stamp(s.updated)}`, 'aria-label': `${s.title}, ${pr.name}`,
+        onclick: () => { chatPick = { key: pr.key, id: s.id }; renderMap(); },
+      });
+    })))));
+  renderChatDetail();
+}
+
+function renderChatDetail() {
+  const pr = chatData?.find((p) => p.key === chatPick?.key);
+  const s = pr?.sessions.find((x) => x.id === chatPick.id);
+  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat.'));
+  const agent = S.agents.find((a) => a.sessionId === s.id);
+  let action = null;
+  if (pr.current && agent) action = h('button', { type: 'button', class: 'btn primary', onclick: () => openAgent(agent.id) }, 'Open its terminal');
+  else if (pr.current) action = h('button', { type: 'button', class: 'btn primary', onclick: () => createAgent({ sessionId: s.id }) }, 'Continue here');
+  else if (pr.dir) {
+    action = h('button', { type: 'button', class: 'btn primary', onclick: guard(async () => {
+      await api('POST', '/api/open-project', { dir: pr.dir });
+      toast(`Opening ${pr.name} in a new UltraClaude window`);
+    }) }, 'Open folder in UltraClaude');
+  }
+  $('mapDetail').replaceChildren(...[
+    h('h2', {}, s.title),
+    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, stamp(s.updated)), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
+    s.firstPrompt && s.firstPrompt !== s.title ? h('div', {}, h('h3', {}, 'Began with'), h('p', { class: 'quote' }, s.firstPrompt)) : null,
+    action,
+    pr.current ? null : h('p', { class: 'none' }, 'Chats from other folders continue in that folder’s own UltraClaude window.'),
+  ].filter(Boolean));
 }
 
 function openAgent(id) {
@@ -85,6 +156,7 @@ const rows = new Map(); // agent id -> roster row
 
 function syncSide() {
   for (const b of $('nav').children) b.classList.toggle('active', b.dataset.view === S.view);
+  $('mapBtn').classList.toggle('active', S.view === 'map');
   setText($('navTasks'), String(S.tasks.filter((t) => t.status !== 'done').length || ''));
   setText($('navNotes'), String(S.noteCount || ''));
   for (const [id, r] of rows) if (!agentBy(id)) { r.wrap.remove(); rows.delete(id); }
@@ -364,11 +436,12 @@ function ensureTerm(a) {
     if (confirm(`Remove agent “${agentBy(a.id)?.name}”? Its session will be ended.`)) await api('DELETE', `/api/agents/${a.id}`);
   }) }, 'Remove');
   t.off = h('div', { class: 'pane-off' }, 'Stopped. Start it to continue its session.');
-  t.body = h('div', { class: 'pane-body' }, t.off);
+  t.host = h('div', { class: 'term-host' });
+  t.body = h('div', { class: 'pane-body' }, t.host, t.off);
   t.hide = h('button', { type: 'button', class: 'link hide', title: 'Hide from All terminals', 'aria-label': 'Hide from All terminals', onclick: () => hideFromGrid(a.id) }, '−');
   t.pane = h('div', { class: 'pane' }, h('div', { class: 'pane-head' }, t.dot, t.nm, t.meta, t.toggle, t.hide, remove), t.body);
   t.body.addEventListener('paste', (ev) => pasteImage(ev, a.id), true); // Ctrl+V with an image on the clipboard
-  new ResizeObserver(() => fitTerm(t)).observe(t.body);
+  new ResizeObserver(() => fitTerm(t)).observe(t.host);
   $('terms').append(t.pane);
   terms.set(a.id, t);
   return t;
@@ -397,7 +470,7 @@ function pasteImage(ev, id) {
 function fitTerm(t) {
   clearTimeout(t.fitTimer);
   t.fitTimer = setTimeout(() => {
-    if (!t.opened || !t.body.clientWidth || !t.body.clientHeight) return;
+    if (!t.opened || !t.host.clientWidth || !t.host.clientHeight) return;
     try { t.fit.fit(); } catch { /* not measurable yet */ }
   }, 120);
 }
@@ -411,7 +484,7 @@ function layoutTerms() {
     t.pane.hidden = !show;
     t.hide.hidden = !S.grid;
     if (show && S.view === 'agents') {
-      if (!t.opened) { t.term.open(t.body); t.opened = true; }
+      if (!t.opened) { t.term.open(t.host); t.opened = true; }
       requestAnimationFrame(() => fitTerm(t));
     }
   }
@@ -676,6 +749,8 @@ $('selOpen').addEventListener('click', openTogether);
 $('selStop').addEventListener('click', stopPicked);
 $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
+$('mapBtn').addEventListener('click', () => setView('map'));
+$('mapFilter').addEventListener('input', renderMap);
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder

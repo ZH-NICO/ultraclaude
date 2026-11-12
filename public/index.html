@@ -11,10 +11,10 @@
 <body>
   <aside class="side">
     <div class="brand">
-      <span class="wordmark">
+      <button type="button" class="wordmark" id="mapBtn" title="Map of all your Claude Code chats">
         <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M10 10V3.4M10 10l5.7 3.3M10 10l-5.7 3.3" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/><circle cx="10" cy="3.4" r="1.7" fill="currentColor"/><circle cx="15.7" cy="13.3" r="1.7" fill="currentColor"/><circle cx="4.3" cy="13.3" r="1.7" fill="currentColor"/></svg>
         ultraclaude
-      </span>
+      </button>
       <span class="project" id="projectName"></span>
     </div>
 
@@ -82,6 +82,21 @@
             <button class="btn">Send</button>
           </form>
         </aside>
+      </div>
+    </section>
+
+    <section id="view-map" class="view" hidden>
+      <header class="view-head">
+        <h1>All chats</h1>
+        <p class="sub" id="mapSummary"></p>
+        <input id="mapFilter" class="head-filter" placeholder="Find a chat" autocomplete="off" aria-label="Find a chat">
+      </header>
+      <div class="chatmap">
+        <div class="map-scroll">
+          <div class="map-axis" id="mapAxis"></div>
+          <div id="mapRows"></div>
+        </div>
+        <aside class="map-detail" id="mapDetail"></aside>
       </div>
     </section>
 

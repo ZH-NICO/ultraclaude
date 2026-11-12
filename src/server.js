@@ -11,6 +11,7 @@ import { WebSocketServer } from 'ws';
 import { Project } from './project.js';
 import { ROLES } from './roles.js';
 import { KNOWLEDGE } from './vault.js';
+import { claudeProjectDir, listAllProjects } from './history.js';
 import { handleMcp } from './mcp.js';
 import { loadConfig } from './config.js';
 
@@ -144,6 +145,27 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     if (idMatch?.[1] === 'tasks') {
       if (req.method === 'PATCH') return send(res, 200, project.updateTask('user', idMatch[2], body));
       if (req.method === 'DELETE') { project.deleteTask(idMatch[2]); return send(res, 200, { ok: true }); }
+    }
+    if (route === 'GET /api/chats') {
+      // every Claude Code chat on this computer, by folder, for the map behind the "ultraclaude" mark
+      const here = path.basename(claudeProjectDir(project.dir));
+      const open = new Set(project.state.agents.map((a) => a.sessionId));
+      const projects = listAllProjects().map((pr) => ({
+        ...pr,
+        dir: pr.key === here ? project.dir : pr.dir,
+        name: pr.key === here ? project.name : pr.name,
+        current: pr.key === here,
+        sessions: pr.sessions.map(({ cwd, ...s }) => ({ ...s, open: pr.key === here && open.has(s.id) })),
+      }));
+      return send(res, 200, { projects });
+    }
+    if (route === 'POST /api/open-project') {
+      // only folders Claude Code itself has worked in can be opened from here
+      const known = listAllProjects().map((pr) => pr.dir).filter(Boolean);
+      const dir = known.find((d) => path.resolve(d).toLowerCase() === path.resolve(String(body.dir || '')).toLowerCase());
+      if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 400, { error: 'That folder does not exist any more.' });
+      spawn(process.execPath, [path.join(ROOT, 'bin', 'ultraclaude.js')], { cwd: dir, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      return send(res, 200, { ok: true });
     }
     if (route === 'GET /api/notes') { project.syncClaudeCode(); return send(res, 200, project.vault.list()); }
     if (route === 'GET /api/note') {

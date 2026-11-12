@@ -94,3 +94,33 @@ test('sessions and Claude Code memory of a folder show up and can be continued',
   await api('DELETE', `/api/agents/${agent.id}`);
   assert.deepEqual((await api('GET', '/api/state')).sessions.map((s) => s.id), [B, A, C], 'removing the agent puts its session back');
 });
+
+test('the map lists every folder Claude Code worked in, and only those can be opened', async (t) => {
+  const { listAllProjects } = await import('../src/history.js');
+  const here = tmp('here');
+  const elsewhere = tmp('elsewhere');
+  const E = '55555555-5555-4555-8555-555555555555';
+  const F = '66666666-6666-4666-8666-666666666666';
+  writeSession(here, F, [user('Plan the release', { cwd: here })], 3);
+  writeSession(elsewhere, E, [user('Tidy up the docs', { cwd: elsewhere }), line({ type: 'ai-title', aiTitle: 'Docs cleanup' })], 60 * 24 * 40);
+
+  const all = listAllProjects();
+  const other = all.find((p) => p.dir === elsewhere);
+  assert.equal(other.name, path.basename(elsewhere));
+  assert.deepEqual(other.sessions.map((s) => s.title), ['Docs cleanup']);
+  assert.ok(all.findIndex((p) => p.dir === here) < all.indexOf(other), 'most recently used folder first');
+
+  const app = await startServer({ dir: here, vaultPath: tmp('v2') });
+  t.after(() => app.close());
+  const call = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+  const { projects } = await (await call('GET', '/api/chats')).json();
+  const mine = projects.find((p) => p.current);
+  assert.equal(mine.dir, here);
+  assert.equal(mine.sessions[0].title, 'Plan the release');
+  assert.equal(projects.filter((p) => p.current).length, 1);
+  assert.ok(!('cwd' in mine.sessions[0]));
+
+  const refused = await call('POST', '/api/open-project', { dir: os.tmpdir() });
+  assert.equal(refused.status, 400, 'a folder Claude Code never worked in cannot be opened');
+  assert.equal((await refused.json()).error, 'That folder does not exist any more.');
+});

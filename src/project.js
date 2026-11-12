@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vault, KNOWLEDGE } from './vault.js';
-import { listSessions, claudeMemoryFiles } from './history.js';
+import { listSessions, claudeMemoryFiles, claudeSetting } from './history.js';
 import { roleById, roleName, buildPrompt } from './roles.js';
 
 const HOOK_SCRIPT = fileURLToPath(new URL('./hook.js', import.meta.url)).replace(/\\/g, '/');
@@ -131,7 +131,7 @@ export class Project extends EventEmitter {
   view(a) {
     const r = this.runtime.get(a.id);
     return {
-      id: a.id, name: a.name, roleId: a.roleId, roleName: roleName(a),
+      id: a.id, name: a.name, roleId: a.roleId, roleName: roleName(a), sessionId: a.sessionId,
       model: a.model, permissionMode: a.permissionMode, worktree: a.worktree,
       state: r.state, activity: r.activity, statusText: r.statusText, toolCount: r.toolCount, lastActive: r.lastActive,
       unread: this.state.messages.filter((m) => m.to === a.id && !m.delivered).length,
@@ -225,6 +225,12 @@ export class Project extends EventEmitter {
     if (markers.some((k) => k in env)) delete env.NO_COLOR;
     for (const k of markers) delete env[k];
     env.COLORTERM ||= 'truecolor'; // the terminal in the window supports 24-bit colour
+    // Claude Code's fullscreen rendering keeps the prompt pinned at the bottom while the chat scrolls
+    // above it. Claude Code does not recognise this terminal and would fall back to inline rendering,
+    // where the prompt scrolls away with the chat, so it is switched on here unless the user's own
+    // Claude Code settings ask for a different "tui".
+    const tui = claudeSetting('tui');
+    if (env.CLAUDE_CODE_NO_FLICKER === undefined && (tui === undefined || tui === 'fullscreen')) env.CLAUDE_CODE_NO_FLICKER = '1';
 
     let argv = args;
     if (/\.(cmd|bat)$/i.test(file)) { argv = ['/c', file, ...args]; file = 'cmd.exe'; }
