@@ -100,7 +100,7 @@ export class Vault {
     const inProject = path.relative(this.projectDir, file);
     let kind = 'Vault';
     if (rel.startsWith('Global/')) kind = 'Global';
-    else if (!inProject.startsWith('..')) kind = inProject.includes(path.sep) ? inProject.split(path.sep)[0] : 'Projekt';
+    else if (!inProject.startsWith('..')) kind = inProject.includes(path.sep) ? inProject.split(path.sep)[0] : 'Project';
     const info = {
       path: rel,
       title: path.basename(file, '.md'),
@@ -169,16 +169,20 @@ export class Vault {
   writeAgentNote(a) {
     const file = path.join(this.projectDir, 'Agents', `${safeName(a.name)}.md`);
     fs.writeFileSync(file, front({ role: a.roleName, state: a.state, updated: stamp(), project: this.project }) +
-      `# ${a.icon} ${a.name}\n\n**Rolle:** ${a.roleName}\n\n**Status:** ${a.statusText || '—'}\n\n**Zustand:** ${a.state}\n\nProjekt: [[${this.project}]]\n`);
+      `# ${a.name}\n\n**Role:** ${a.roleName}\n\n**Working on:** ${a.statusText || '—'}\n\n**State:** ${a.state}\n\nProject: [[${this.project}]]\n`);
+  }
+
+  removeAgentNote(name) {
+    fs.rmSync(path.join(this.projectDir, 'Agents', `${safeName(name)}.md`), { force: true });
   }
 
   writeBoard(tasks) {
     const col = (status, label) => {
       const items = tasks.filter((t) => t.status === status);
       const lines = items.map((t) => `- [${status === 'done' ? 'x' : ' '}] **#${t.id}** ${t.title}${t.assignee ? ` — [[${safeName(t.assignee)}]]` : ''}${t.description ? `\n  ${t.description.replace(/\s+/g, ' ')}` : ''}`);
-      return `## ${label} (${items.length})\n\n${lines.join('\n') || '_leer_'}\n`;
+      return `## ${label} (${items.length})\n\n${lines.join('\n') || '_empty_'}\n`;
     };
     fs.writeFileSync(path.join(this.projectDir, 'Tasks', `${this.project} Board.md`),
-      `# ${this.project} — Board\n\n${col('todo', 'Offen')}\n${col('in_progress', 'In Arbeit')}\n${col('done', 'Erledigt')}`);
+      `# ${this.project} — Board\n\n${col('todo', 'Open')}\n${col('in_progress', 'In progress')}\n${col('done', 'Done')}`);
   }
 }

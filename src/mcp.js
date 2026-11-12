@@ -38,7 +38,7 @@ const taskLine = (t) => `#${t.id} [${t.status}] ${t.title}${t.assignee ? ` — $
 function callTool(project, agent, name, args = {}) {
   switch (name) {
     case 'list_agents':
-      return project.views().map((a) => `- ${a.name}${a.id === agent.id ? ' (you)' : ''} · ${a.roleName} · ${a.state}${a.statusText ? ` · ${a.statusText}` : ''}${a.activity ? ` · now: ${a.activity}` : ''}`).join('\n');
+      return project.views().map((a) => `- ${a.name}${a.id === agent.id ? ' (you)' : ''} (${a.roleName}) — ${project.describe(a)}`).join('\n');
     case 'send_message':
       return project.sendMessage(agent.name, args.to, args.message);
     case 'read_messages':
@@ -48,18 +48,18 @@ function callTool(project, agent, name, args = {}) {
       return 'Status updated.';
     case 'memory_search': {
       const hits = project.vault.search(args.query);
-      project.event('memory', agent.name, `sucht „${args.query}“ (${hits.length} Treffer)`, { op: 'read' });
+      project.event('memory', agent.name, `searched memory for “${args.query}” (${hits.length} ${hits.length === 1 ? 'hit' : 'hits'})`, { op: 'read' });
       return hits.length ? hits.map((h) => `## ${h.title}  (${h.path}, updated ${h.updated})\n${h.excerpt}`).join('\n\n') : 'Nothing found in shared memory.';
     }
     case 'memory_read': {
       const n = project.vault.read(args.note);
       if (!n) throw new Error(`No note "${args.note}". Use memory_list or memory_search.`);
-      project.event('memory', agent.name, `liest „${n.title}“`, { op: 'read' });
+      project.event('memory', agent.name, `read “${n.title}” from memory`, { op: 'read' });
       return `# ${n.title}\n(${n.path} · updated ${n.updated} · authors: ${n.authors.join(', ') || '?'}${n.tags.length ? ` · tags: ${n.tags.join(', ')}` : ''})\n\n${n.body}`;
     }
     case 'memory_write': {
       const res = project.vault.write({ ...args, author: agent.name });
-      project.event('memory', agent.name, `speichert „${res.title}“`, { op: 'write', path: res.path });
+      project.event('memory', agent.name, `saved “${res.title}” to memory`, { op: 'write', path: res.path });
       project.emit('notes');
       return `Saved to shared memory: ${res.path}`;
     }

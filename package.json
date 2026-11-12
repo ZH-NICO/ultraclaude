@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "ultraclaude",
   "version": "0.1.0",
   "description": "Run a team of Claude Code agents side by side: shared Obsidian memory, roles, agent-to-agent messaging and a live dashboard.",
@@ -15,6 +15,8 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
     "@lydell/node-pty": "^1.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",

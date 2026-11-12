@@ -1,101 +1,103 @@
 # UltraClaude
 
-Ein Team aus Claude-Code-Agents in einem Fenster. Jeder Agent hat eine Rolle (Bugfixer, PR-Reviewer, Tester, …), alle teilen dieselbe Memory in einem Obsidian-Vault, wissen voneinander und schreiben sich Nachrichten. So kannst du gleichzeitig einen PR reviewen lassen und ein Ticket lösen, und beide Agents arbeiten mit demselben Wissen.
+Run a team of Claude Code agents in one window. Each agent has a role (bugfixer, PR reviewer, tester, …), all of them share one memory in an Obsidian vault, they see what the others are doing and they message each other. You can have one agent review a pull request while another solves a ticket, and both work from the same knowledge.
 
-## Schnellstart
+![Overview with five agents around the shared memory](docs/overview.png)
+
+## Install
+
+You need [Node.js](https://nodejs.org) 20 or newer and [Claude Code](https://claude.com/claude-code) (the `claude` command works in your terminal and you are signed in). Obsidian is optional: the vault is a normal folder of Markdown files.
 
 ```bash
-git clone <dieses-repo> ultraclaude
+git clone <repository-url> ultraclaude
 cd ultraclaude
 npm install
-npm link          # macht den Befehl "ultraclaude" überall verfügbar
+npm link        # makes the "ultraclaude" command available everywhere
 ```
 
-Danach in einem beliebigen Projektordner:
+## Use
 
 ```bash
-cd mein-projekt
+cd my-project
 ultraclaude
 ```
 
-Das UltraClaude-Fenster öffnet sich. Ein Klick auf eine Rolle startet den ersten Agent.
+A window opens for that folder. Pick a role to start your first agent.
 
-Voraussetzungen: Node.js 20+, [Claude Code](https://claude.com/claude-code) (`claude` im PATH, eingeloggt). Obsidian ist optional, der Vault ist ein normaler Ordner mit Markdown-Dateien.
+The first time Claude Code runs in a folder it asks in the agent's terminal whether you trust the folder. Select "Yes" there.
 
-## Was du bekommst
-
-| Bereich | Inhalt |
+| View | What it shows |
 | --- | --- |
-| **Dashboard** | Graph aller Agents rund um die gemeinsame Memory. Farbe zeigt den Zustand (arbeitet, braucht dich, bereit, gestoppt), darunter steht, was der Agent gerade tut. Nachrichten und Memory-Zugriffe laufen als Punkte durch den Graph. Rechts der Live-Feed und ein Feld, um dem Team zu schreiben. |
-| **Agents** | Die echten Claude-Code-Terminals. Einzeln oder alle nebeneinander. |
-| **Aufgaben** | Kanban-Board (Offen, In Arbeit, Erledigt). Du und die Agents legen Aufgaben an; wer eine zugewiesen bekommt, wird benachrichtigt. |
-| **Memory** | Alle Notizen des Vaults zum Durchsuchen und Lesen, mit Sprung nach Obsidian. |
+| **Overview** | Every agent around the shared memory, with its state and what it is doing right now. Messages and memory access move through the graph as they happen. Next to it: the activity feed and a box to message your agents. |
+| **Agents** (sidebar) | The real Claude Code terminals, one at a time or all side by side. The sidebar always shows who is working, idle or waiting for you. |
+| **Tasks** | A board with Open, In progress and Done. You and the agents add tasks; whoever gets one assigned is told. |
+| **Memory** | All notes in the vault, to filter and read, with a jump into Obsidian. |
 
-Wenn ein Agent eine Erlaubnis braucht oder dir etwas meldet, bekommst du einen Hinweis im Fenster und im Tab-Titel.
+Colour only ever means state: green is working, amber needs you.
 
-## Rollen
+## Roles
 
-Bugfixer, Entwickler, PR-Reviewer, Tester, Ticket-Ersteller, Architekt, Doku-Schreiber, Koordinator oder eine eigene Rolle mit deiner Beschreibung. Über „+ Agent“ kannst du zusätzlich Name, Anweisungen, eine erste Aufgabe, Modell, Berechtigungsmodus und einen eigenen Git-Worktree wählen.
+Bugfixer, Developer, PR Reviewer, Tester, Ticket Writer, Architect, Docs Writer, Coordinator, or a custom role you describe yourself. "New agent" also lets you set a name, extra instructions, a first task, the model, the permission mode and a separate git worktree.
 
-## Gemeinsame Memory (Obsidian)
+## Shared memory
 
-Standard-Vault: `~/UltraClaudeVault`. Ändern mit `ultraclaude vault <pfad>` (z.B. auf deinen bestehenden Vault).
+The default vault is `~/UltraClaudeVault`. Change it with `ultraclaude vault <path>`, for example to a folder inside a vault you already use.
 
 ```
 UltraClaudeVault/
-  Global/                      Wissen für alle Projekte
-  Projects/<projekt>/
-    Memory/                    Wissen der Agents: Entscheide, Architektur, Stolpersteine
-    Agents/                    eine Notiz pro Agent mit Rolle und aktuellem Status
-    Tasks/<projekt> Board.md   das Board als Checkliste
-    Log/2026-11-12.md          Journal: wer hat was wann getan
+  Global/                      knowledge for all your projects
+  Projects/<project>/
+    Memory/                    what the agents learned: decisions, architecture, gotchas
+    Agents/                    one note per agent with its role and current status
+    Tasks/<project> Board.md   the board as a checklist
+    Log/2026-01-31.md          journal: who did what, and when
 ```
 
-In Obsidian: „Ordner als Vault öffnen“ und den Vault-Pfad wählen. Notizen, die du selbst in `Memory/` oder `Global/` schreibst, finden die Agents ebenfalls.
+To see it in Obsidian, choose "Open folder as vault" and pick the vault folder. Notes you write yourself in `Memory/` or `Global/` are found by the agents too.
 
-## Wie es funktioniert
+## How it works
 
-- `ultraclaude` startet pro Projektordner einen kleinen lokalen Server (nur `127.0.0.1`, mit Zugriffstoken) und öffnet das Fenster. Schliesst du das Fenster, laufen die Agents weiter; der Server beendet sich, sobald kein Fenster offen ist und kein Agent mehr läuft.
-- Jeder Agent ist ein normaler `claude`-Prozess in einem Pseudo-Terminal, gestartet mit seinem Rollen-Prompt.
-- Ein eingebauter MCP-Server gibt jedem Agent die Team-Werkzeuge: `list_agents`, `send_message`, `read_messages`, `set_status`, `memory_search`, `memory_read`, `memory_write`, `memory_list`, `task_list`, `task_create`, `task_update`.
-- Claude-Code-Hooks melden dem Dashboard live, was der Agent tut, und stellen Nachrichten zu: bei einem beschäftigten Agent nach dem nächsten Tool-Aufruf, bei einem wartenden Agent direkt als neue Eingabe.
-- Beim Start bekommt jeder Agent ein Briefing: wer im Team ist, offene Aufgaben, vorhandene Memory-Notizen.
-- Nur der Server schreibt in den Vault, deshalb überschreiben sich parallele Agents nicht.
-- Der Zustand eines Projekts (Agents, Aufgaben, Nachrichten) liegt in `<projekt>/.ultraclaude/` und wird von Git ignoriert. Gestoppte Agents setzen ihre Session beim nächsten Start fort.
+- `ultraclaude` starts a small local server for the folder you are in (it listens on `127.0.0.1` only and requires an access token) and opens the window. Closing the window leaves the agents running. The server exits once no window is open and no agent is running, or when you choose Quit.
+- Each agent is a regular `claude` process in a pseudo terminal, started with its role prompt.
+- A built-in MCP server gives every agent the team tools: `list_agents`, `send_message`, `read_messages`, `set_status`, `memory_search`, `memory_read`, `memory_write`, `memory_list`, `task_list`, `task_create`, `task_update`.
+- Claude Code hooks report to the dashboard what an agent is doing, and they deliver messages: to a busy agent after its next tool call, to an idle agent as new input.
+- When an agent starts it gets a briefing: who is on the team, the open tasks and the notes already in memory.
+- Only the server writes to the vault, so agents working in parallel do not overwrite each other.
+- A project's state (agents, tasks, messages) lives in `<project>/.ultraclaude/`, which git ignores. A stopped agent continues its session the next time you start it.
 
-## Befehle
+## Commands
 
 ```
-ultraclaude              Fenster für den aktuellen Ordner öffnen
-ultraclaude stop         Server und alle Agents dieses Ordners beenden
-ultraclaude status       läuft der Server für diesen Ordner?
-ultraclaude vault [pfad] Vault anzeigen oder ändern
-ultraclaude --no-open    Server starten ohne Fenster
+ultraclaude               open the window for the current folder
+ultraclaude stop          stop the server and all agents of this folder
+ultraclaude status        is a server running for this folder?
+ultraclaude vault [path]  show or change the vault
+ultraclaude --no-open     start the server without a window
 ```
 
-## Gut zu wissen
+## Good to know
 
-- In einem neuen Ordner fragt Claude Code einmal, ob du dem Ordner vertraust. Bestätige das im Terminal des Agents.
-- Alle Agents arbeiten im selben Ordner. Für Agents, die gleichzeitig Code ändern, lohnt sich die Option „Eigener Git-Worktree“.
-- Jeder Agent verbraucht dein Claude-Kontingent. Viele parallele Agents erreichen das Limit schneller.
+- All agents work in the same folder. For agents that change code at the same time, use the "Own git worktree" option.
+- Every agent uses your Claude quota. Many agents in parallel reach the limit sooner.
+- The window is a Chromium app window when Edge or Chrome is installed, otherwise a tab in your default browser.
 
-## Entwicklung
+## Development
 
 ```bash
-npm test     # Vault, Nachrichten, Aufgaben, Hooks, MCP und API (ohne echte Claude-Prozesse)
+npm test    # vault, messages, tasks, hooks, MCP and the HTTP API, without real Claude processes
 ```
 
 ```
-bin/ultraclaude.js   CLI
-src/server.js        HTTP, WebSocket, MCP- und Hook-Endpunkt
-src/project.js       Agents, Nachrichten, Aufgaben, Hook-Logik
-src/mcp.js           Team-Werkzeuge
-src/vault.js         Obsidian-Vault
-src/roles.js         Rollen und Agent-Prompt
-src/hook.js          Hook-Skript, das Claude Code aufruft
-public/              Oberfläche (ohne Build-Schritt)
+bin/ultraclaude.js   command line
+src/server.js        HTTP, WebSocket, MCP endpoint and hook endpoint
+src/project.js       agents, messages, tasks, hook logic
+src/mcp.js           the team tools
+src/vault.js         the Obsidian vault
+src/roles.js         roles and the agent prompt
+src/hook.js          hook script that Claude Code calls
+public/              the interface (no build step)
 ```
 
-## Lizenz
+## License
 
 MIT

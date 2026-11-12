@@ -7,53 +7,59 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vault } from './vault.js';
-import { roleById, buildPrompt } from './roles.js';
+import { roleById, roleName, buildPrompt } from './roles.js';
 
 const HOOK_SCRIPT = fileURLToPath(new URL('./hook.js', import.meta.url)).replace(/\\/g, '/');
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop'];
 const BUFFER_MAX = 400_000;
 const TASK_STATES = ['todo', 'in_progress', 'done'];
+const TASK_LABEL = { todo: 'open', in_progress: 'in progress', done: 'done' };
+const RESERVED_NAMES = ['user', 'you', 'all', 'everyone'];
+const BROADCAST = ['all', 'everyone', '*'];
 
+/** Path of the Claude Code executable, or null when it is not installed. */
 function resolveClaude() {
   if (process.env.ULTRACLAUDE_CLAUDE) return process.env.ULTRACLAUDE_CLAUDE;
   try {
-    const out = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], { encoding: 'utf8' });
+    const out = execFileSync(process.platform === 'win32' ? 'where.exe' : 'which', ['claude'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
     const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    return lines.find((l) => /\.exe$/i.test(l)) || lines.find((l) => /\.cmd$/i.test(l)) || lines[0] || 'claude';
+    return lines.find((l) => /\.exe$/i.test(l)) || lines.find((l) => /\.cmd$/i.test(l)) || lines[0] || null;
   } catch {
-    return 'claude';
+    return null;
   }
 }
 
 const base = (f) => (f ? String(f).split(/[\\/]/).pop() : '');
 const short = (s, n = 60) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 
+/** One short line for the dashboard that says what a tool call is doing. */
 export function describeTool(name, input = {}) {
   if (name?.startsWith('mcp__ultraclaude__')) {
     const t = name.slice('mcp__ultraclaude__'.length);
     return ({
-      send_message: `schreibt an ${input.to || '?'}`,
-      read_messages: 'liest Nachrichten',
-      list_agents: 'schaut, was das Team macht',
-      set_status: 'aktualisiert Status',
-      memory_search: `durchsucht Memory: ${short(input.query, 40)}`,
-      memory_read: `liest Memory: ${short(input.note, 40)}`,
-      memory_write: `speichert Memory: ${short(input.title, 40)}`,
-      memory_list: 'listet Memory',
-      task_list: 'liest Aufgaben',
-      task_create: `erstellt Aufgabe: ${short(input.title, 40)}`,
-      task_update: `aktualisiert Aufgabe #${input.id ?? '?'}`,
+      send_message: `messaging ${input.to || '?'}`,
+      read_messages: 'reading messages',
+      list_agents: 'checking on the team',
+      set_status: 'updating status',
+      memory_search: `searching memory: ${short(input.query, 40)}`,
+      memory_read: `reading memory: ${short(input.note, 40)}`,
+      memory_write: `saving memory: ${short(input.title, 40)}`,
+      memory_list: 'listing memory',
+      task_list: 'reading the task board',
+      task_create: `creating task: ${short(input.title, 40)}`,
+      task_update: `updating task #${input.id ?? '?'}`,
     })[t] || t;
   }
   switch (name) {
-    case 'Read': return `liest ${base(input.file_path)}`;
-    case 'Edit': case 'Write': case 'NotebookEdit': return `bearbeitet ${base(input.file_path || input.notebook_path)}`;
+    case 'Read': return `reading ${base(input.file_path)}`;
+    case 'Edit': case 'Write': case 'NotebookEdit': return `editing ${base(input.file_path || input.notebook_path)}`;
     case 'Bash': case 'PowerShell': return `$ ${short(input.command)}`;
-    case 'Grep': case 'Glob': return `sucht ${short(input.pattern, 40)}`;
-    case 'Agent': case 'Task': return `Subagent: ${short(input.description, 40)}`;
-    case 'WebFetch': return `Web: ${short(input.url, 50)}`;
-    case 'WebSearch': return `Websuche: ${short(input.query, 40)}`;
-    default: return name?.startsWith('mcp__') ? name.split('__').slice(1).join(' · ') : String(name || 'arbeitet');
+    case 'Grep': case 'Glob': return `searching ${short(input.pattern, 40)}`;
+    case 'Agent': case 'Task': return `subagent: ${short(input.description, 40)}`;
+    case 'WebFetch': return `fetching ${short(input.url, 50)}`;
+    case 'WebSearch': return `web search: ${short(input.query, 40)}`;
+    case 'ToolSearch': return 'looking up tools';
+    default: return name?.startsWith('mcp__') ? name.split('__').slice(1).join(' · ') : String(name || 'working');
   }
 }
 
@@ -104,7 +110,7 @@ export class Project extends EventEmitter {
   view(a) {
     const r = this.runtime.get(a.id);
     return {
-      id: a.id, name: a.name, roleId: a.roleId, roleName: a.roleName, icon: a.icon, color: a.color,
+      id: a.id, name: a.name, roleId: a.roleId, roleName: roleName(a),
       model: a.model, permissionMode: a.permissionMode, worktree: a.worktree,
       state: r.state, activity: r.activity, statusText: r.statusText, toolCount: r.toolCount, lastActive: r.lastActive,
       unread: this.state.messages.filter((m) => m.to === a.id && !m.delivered).length,
@@ -119,6 +125,7 @@ export class Project extends EventEmitter {
     if (a) { try { this.vault.writeAgentNote(this.view(a)); } catch { /* vault unavailable */ } }
   }
 
+  /** Adds an entry to the activity feed. `text` reads as a sentence after the agent's name. */
   event(type, agent, text, extra = {}) {
     const e = { id: crypto.randomUUID(), ts: Date.now(), type, agent, text: short(text, 400), ...extra };
     this.events.push(e);
@@ -132,19 +139,18 @@ export class Project extends EventEmitter {
 
   createAgent({ roleId = 'custom', name, instructions = '', model = '', permissionMode = '', worktree = false, prompt = '' }) {
     const role = roleById(roleId);
-    let wanted = short(name || (role.id === 'custom' ? 'Agent' : role.name), 40).replace(/["\r\n]/g, '');
+    const wanted = short(name || (role.id === 'custom' ? 'Agent' : role.name), 40).replace(/["\r\n]/g, '');
     let unique = wanted;
-    for (let i = 2; this.agent(unique) || ['user', 'all', 'alle'].includes(unique.toLowerCase()); i++) unique = `${wanted} ${i}`;
+    for (let i = 2; this.agent(unique) || RESERVED_NAMES.includes(unique.toLowerCase()); i++) unique = `${wanted} ${i}`;
     const a = {
       id: crypto.randomBytes(4).toString('hex'), name: unique, roleId: role.id,
-      roleName: role.id === 'custom' ? unique : role.name, icon: role.icon, color: role.color,
       instructions: String(instructions).trim(), model, permissionMode, worktree: !!worktree,
       sessionId: crypto.randomUUID(), started: false, createdAt: Date.now(),
     };
     this.state.agents.push(a);
     this.runtime.set(a.id, this.#freshRuntime());
     this.save();
-    this.startAgent(a.id, { prompt }).catch((err) => this.event('error', a.name, `Start fehlgeschlagen: ${err.message}`));
+    this.startAgent(a.id, { prompt }).catch((err) => this.event('error', a.name, `failed to start: ${err.message}`));
     return this.view(a);
   }
 
@@ -154,6 +160,14 @@ export class Project extends EventEmitter {
     if (!a || r.pty) return;
     if (!this.endpoint) throw new Error('Server is not listening yet');
     const { port, token } = this.endpoint;
+    const fail = (message) => {
+      Object.assign(r, { state: 'stopped', activity: '' });
+      this.event('error', a.name, `failed to start: ${message}`);
+      this.#changed(a);
+    };
+
+    let file = resolveClaude();
+    if (!file) return fail('Claude Code was not found. Install it and make sure the "claude" command works in your terminal.');
     const pty = (await import('@lydell/node-pty')).default;
 
     const dir = path.join(this.dataDir, 'agents', a.id);
@@ -180,18 +194,14 @@ export class Project extends EventEmitter {
     // If UltraClaude itself was launched from inside a Claude Code session, don't pass that session's markers on.
     for (const k of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID']) delete env[k];
 
-    let file = resolveClaude();
     let argv = args;
     if (/\.(cmd|bat)$/i.test(file)) { argv = ['/c', file, ...args]; file = 'cmd.exe'; }
 
-    Object.assign(r, { state: 'starting', activity: 'startet…', buffer: '', pendingPrompt: prompt, startedAt: Date.now() });
+    Object.assign(r, { state: 'starting', activity: '', buffer: '', pendingPrompt: prompt, startedAt: Date.now() });
     try {
       r.pty = pty.spawn(file, argv, { name: 'xterm-256color', cols, rows, cwd: this.dir, env });
     } catch (err) {
-      Object.assign(r, { state: 'stopped', activity: '' });
-      this.event('error', a.name, `Start fehlgeschlagen: ${err.message}`);
-      this.#changed(a);
-      return;
+      return fail(err.message);
     }
     r.pty.onData((d) => {
       r.buffer += d;
@@ -208,9 +218,19 @@ export class Project extends EventEmitter {
         a.sessionId = crypto.randomUUID();
         this.save();
       }
-      if (this.agent(a.id)) { this.event('stop', a.name, 'wurde beendet'); this.#changed(a); }
+      if (this.agent(a.id)) { this.event('stop', a.name, 'stopped'); this.#changed(a); }
     });
-    this.event('start', a.name, resumed ? 'setzt Session fort' : `ist als ${a.roleName} gestartet`);
+    // Claude Code reports in through its SessionStart hook. If that takes long, it is
+    // almost always sitting at a first-run prompt (folder trust, login) in its terminal.
+    const startedAt = r.startedAt;
+    setTimeout(() => {
+      if (r.pty && r.state === 'starting' && r.startedAt === startedAt) {
+        Object.assign(r, { state: 'waiting', activity: 'waiting for you in its terminal' });
+        this.event('waiting', a.name, 'needs you: it is waiting for input in its terminal');
+        this.#changed(a);
+      }
+    }, 10_000).unref();
+    this.event('start', a.name, resumed ? 'resumed its session' : 'started');
     this.#changed(a);
   }
 
@@ -227,7 +247,8 @@ export class Project extends EventEmitter {
     this.runtime.delete(id);
     this.state.messages = this.state.messages.filter((m) => m.to !== id);
     this.save();
-    this.event('stop', a.name, 'wurde entfernt');
+    try { this.vault.removeAgentNote(a.name); } catch { /* vault unavailable */ }
+    this.event('stop', a.name, 'was removed');
     this.emit('agents', this.views());
   }
 
@@ -254,16 +275,16 @@ export class Project extends EventEmitter {
 
   sendMessage(from, to, text) {
     const body = String(text ?? '').trim();
-    if (!body) throw new Error('message is empty');
+    if (!body) throw new Error('The message is empty.');
     const target = String(to ?? '').trim();
     if (target.toLowerCase() === 'user') {
       this.event('notify', from, body, { to: 'user' });
-      return 'Der User sieht die Nachricht im Dashboard.';
+      return 'The user sees your message on the dashboard.';
     }
-    const everyone = ['all', 'alle', '*'].includes(target.toLowerCase());
+    const everyone = BROADCAST.includes(target.toLowerCase());
     const recipients = everyone ? this.state.agents.filter((a) => a.name !== from) : [this.agent(target)].filter(Boolean);
     if (!recipients.length) {
-      throw new Error(everyone ? 'Es gibt keine anderen Agents.' : `Kein Agent "${target}". Vorhanden: ${this.state.agents.map((a) => a.name).join(', ') || 'keine'}`);
+      throw new Error(everyone ? 'There are no other agents.' : `No agent named "${target}". Agents: ${this.state.agents.map((a) => a.name).join(', ') || 'none'}`);
     }
     for (const a of recipients) {
       this.state.messages.push({ id: crypto.randomUUID(), from, to: a.id, text: body, ts: Date.now(), delivered: false });
@@ -273,7 +294,7 @@ export class Project extends EventEmitter {
     this.event('message', from, body, { to: everyone ? 'all' : recipients[0].name });
     for (const a of recipients) this.#deliverIfIdle(a);
     this.emit('agents', this.views());
-    return `Gesendet an ${recipients.map((a) => a.name).join(', ')}.`;
+    return `Sent to ${recipients.map((a) => a.name).join(', ')}.`;
   }
 
   /** Marks an agent's unread messages as delivered and returns them as prompt text ('' if none). */
@@ -302,39 +323,42 @@ export class Project extends EventEmitter {
   }
 
   createTask(by, { title, description = '', assignee = '' }) {
-    if (!String(title ?? '').trim()) throw new Error('title is required');
+    if (!String(title ?? '').trim()) throw new Error('A task needs a title.');
     const who = assignee ? this.agent(assignee) : null;
-    if (assignee && !who) throw new Error(`Kein Agent "${assignee}"`);
+    if (assignee && !who) throw new Error(`No agent named "${assignee}".`);
     const t = { id: this.state.nextTaskId++, title: short(title, 200), description: String(description).trim(), status: 'todo', assignee: who?.name || '', createdBy: by, createdAt: Date.now(), updatedAt: Date.now() };
     this.state.tasks.push(t);
-    this.event('task', by, `Neue Aufgabe #${t.id}: ${t.title}${t.assignee ? ` (für ${t.assignee})` : ''}`);
+    this.event('task', by, `created task #${t.id}: ${t.title}${t.assignee ? ` (for ${t.assignee})` : ''}`);
     this.#tasksChanged();
-    if (who && who.name !== by) this.sendMessage(by, who.name, `Dir wurde Aufgabe #${t.id} zugewiesen: ${t.title}${t.description ? ` — ${t.description}` : ''}`);
+    if (who && who.name !== by) this.sendMessage(by, who.name, `Task #${t.id} was assigned to you: ${t.title}${t.description ? ` — ${t.description}` : ''}`);
     return t;
   }
 
   updateTask(by, id, patch = {}) {
     const t = this.state.tasks.find((x) => x.id === Number(id));
-    if (!t) throw new Error(`Keine Aufgabe #${id}`);
+    if (!t) throw new Error(`There is no task #${id}.`);
+    const before = { status: t.status, assignee: t.assignee };
     if (patch.status !== undefined) {
-      if (!TASK_STATES.includes(patch.status)) throw new Error(`status muss eines von ${TASK_STATES.join(', ')} sein`);
+      if (!TASK_STATES.includes(patch.status)) throw new Error(`status must be one of ${TASK_STATES.join(', ')}`);
       t.status = patch.status;
     }
-    let newAssignee = null;
     if (patch.assignee !== undefined) {
       const who = patch.assignee ? this.agent(patch.assignee) : null;
-      if (patch.assignee && !who) throw new Error(`Kein Agent "${patch.assignee}"`);
-      if (who && who.name !== t.assignee) newAssignee = who;
+      if (patch.assignee && !who) throw new Error(`No agent named "${patch.assignee}".`);
       t.assignee = who?.name || '';
     }
     if (patch.title) t.title = short(patch.title, 200);
     if (patch.description !== undefined) t.description = String(patch.description).trim();
     if (patch.note) t.description = `${t.description}${t.description ? '\n' : ''}${by}: ${String(patch.note).trim()}`;
     t.updatedAt = Date.now();
-    const label = { todo: 'offen', in_progress: 'in Arbeit', done: 'erledigt' }[t.status];
-    this.event('task', by, `Aufgabe #${t.id} „${t.title}“ → ${label}${t.assignee ? ` (${t.assignee})` : ''}`);
+
+    const name = `task #${t.id} “${t.title}”`;
+    const changes = [];
+    if (t.status !== before.status) changes.push(`moved ${name} to ${TASK_LABEL[t.status]}`);
+    if (t.assignee !== before.assignee) changes.push(t.assignee ? `assigned ${name} to ${t.assignee}` : `unassigned ${name}`);
+    this.event('task', by, changes.join(' and ') || `updated ${name}`);
     this.#tasksChanged();
-    if (newAssignee && newAssignee.name !== by) this.sendMessage(by, newAssignee.name, `Dir wurde Aufgabe #${t.id} zugewiesen: ${t.title}`);
+    if (t.assignee && t.assignee !== before.assignee && t.assignee !== by) this.sendMessage(by, t.assignee, `Task #${t.id} was assigned to you: ${t.title}`);
     return t;
   }
 
@@ -345,11 +369,14 @@ export class Project extends EventEmitter {
 
   // ---------- context handed to agents ----------
 
+  /** "working — Fixing the login bug", or "idle — last: …" once the agent is no longer on it. */
+  describe(v) {
+    const busy = v.state === 'working' || v.state === 'waiting';
+    return `${v.state}${v.statusText ? ` — ${busy ? '' : 'last: '}${v.statusText}` : ''}${busy && v.activity ? ` — now: ${v.activity}` : ''}`;
+  }
+
   teamSnapshot(exceptId) {
-    const lines = this.state.agents.filter((a) => a.id !== exceptId).map((a) => {
-      const r = this.runtime.get(a.id);
-      return `- ${a.name} (${a.roleName}) — ${r.state}${r.statusText ? ` — ${r.statusText}` : ''}`;
-    });
+    const lines = this.views().filter((v) => v.id !== exceptId).map((v) => `- ${v.name} (${v.roleName}) — ${this.describe(v)}`);
     return lines.length ? `Team right now:\n${lines.join('\n')}` : 'You are currently the only agent in this project.';
   }
 
@@ -386,7 +413,7 @@ export class Project extends EventEmitter {
         setTimeout(() => this.inject(id, prompt), 1500);
       }
     } else if (ev === 'UserPromptSubmit') {
-      Object.assign(r, { state: 'working', activity: 'denkt nach…' });
+      Object.assign(r, { state: 'working', activity: 'thinking' });
       if (!a.started) { a.started = true; this.save(); }
       out = context([this.teamSnapshot(id), this.takeUnread(id)].filter(Boolean).join('\n\n'));
     } else if (ev === 'PreToolUse') {
@@ -398,8 +425,8 @@ export class Project extends EventEmitter {
       out = context(this.takeUnread(id));
     } else if (ev === 'Notification') {
       if (r.state === 'working' && !/waiting for your input/i.test(p.message || '')) {
-        Object.assign(r, { state: 'waiting', activity: short(p.message || 'braucht dich', 80) });
-        this.event('waiting', a.name, r.activity);
+        Object.assign(r, { state: 'waiting', activity: short(p.message || 'needs your input', 80) });
+        this.event('waiting', a.name, `needs you: ${r.activity}`);
       }
     } else if (ev === 'Stop') {
       const unread = this.takeUnread(id);
@@ -417,7 +444,7 @@ export class Project extends EventEmitter {
     const a = this.agent(id);
     const r = this.runtime.get(id);
     r.statusText = short(text, 140);
-    this.event('status', a.name, r.statusText);
+    this.event('status', a.name, `now: ${r.statusText}`);
     this.#changed(a);
   }
 }

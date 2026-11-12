@@ -37,8 +37,8 @@ test('vault: write, append, read, search, path safety', () => {
 });
 
 test('describeTool gives readable activity', () => {
-  assert.equal(describeTool('Edit', { file_path: 'C:\\a\\b\\app.js' }), 'bearbeitet app.js');
-  assert.equal(describeTool('mcp__ultraclaude__send_message', { to: 'Tester' }), 'schreibt an Tester');
+  assert.equal(describeTool('Edit', { file_path: 'C:\\a\\b\\app.js' }), 'editing app.js');
+  assert.equal(describeTool('mcp__ultraclaude__send_message', { to: 'Tester' }), 'messaging Tester');
 });
 
 test('server: API, MCP tools, messages, tasks and hooks', async (t) => {
@@ -103,12 +103,12 @@ test('server: API, MCP tools, messages, tasks and hooks', async (t) => {
   project.handleHook(bug.id, { hook_event_name: 'Notification', message: 'Claude needs your permission to use Bash' });
   assert.equal(project.views().find((a) => a.id === bug.id).state, 'waiting');
   await call(bug.id, 'set_status', { status: 'Fixing the login bug' });
-  assert.match((await call(tester.id, 'list_agents')).content[0].text, /Bugfixer · Bugfixer · waiting · Fixing the login bug/);
+  assert.match((await call(tester.id, 'list_agents')).content[0].text, /Bugfixer \(Bugfixer\) — waiting — Fixing the login bug — now: Claude needs/);
 
   // tasks: assigning notifies the agent, the board lands in the vault
   const created = await call(bug.id, 'task_create', { title: 'Regression test for login', assignee: 'Tester' });
   assert.match(created.content[0].text, /#1 \[todo\]/);
-  assert.match(project.takeUnread(tester.id), /Aufgabe #1 zugewiesen/);
+  assert.match(project.takeUnread(tester.id), /Task #1 was assigned to you/);
   await call(tester.id, 'task_update', { id: 1, status: 'in_progress', assignee: 'me' });
   await api('PATCH', '/api/tasks/1', { status: 'done' });
   assert.equal((await api('GET', '/api/state')).tasks[0].status, 'done');
@@ -126,7 +126,21 @@ test('server: API, MCP tools, messages, tasks and hooks', async (t) => {
   assert.ok(notes.some((n) => n.kind === 'Memory' && n.title === 'Login bug'));
   assert.ok(notes.some((n) => n.kind === 'Log'));
 
+  // the feed reads as sentences, and a finished agent's status is reported as its last one
+  assert.ok(project.events.some((e) => e.type === 'memory' && e.text === 'saved “Login bug” to memory'));
+  assert.ok(project.events.some((e) => e.type === 'task' && e.text === 'moved task #1 “Regression test for login” to done'));
+  project.handleHook(bug.id, { hook_event_name: 'Stop' });
+  assert.equal(project.describe(project.views().find((a) => a.id === bug.id)), 'idle — last: Fixing the login bug');
+  assert.equal(project.views().find((a) => a.id === tester.id).roleName, 'Tester');
+
+  const agentNote = path.join(project.vault.projectDir, 'Agents', 'Bugfixer 2.md');
+  assert.ok(fs.existsSync(agentNote));
   await api('DELETE', `/api/agents/${bug2.id}`);
+  assert.ok(!fs.existsSync(agentNote), 'a removed agent leaves no note behind');
+  const state = await api('GET', '/api/state');
+  assert.equal(state.notes, 1);
+  assert.deepEqual(state.roles.find((r) => r.id === 'reviewer'), { id: 'reviewer', name: 'PR Reviewer', blurb: 'Reviews pull requests and diffs' });
+  assert.equal((await fetch(`${base}/vendor/plex-sans-400.woff2`)).headers.get('content-type'), 'font/woff2');
   assert.equal((await api('GET', '/api/state')).agents.length, 2);
   project.saveNow();
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.ultraclaude', 'state.json'), 'utf8')).agents.length, 2);
