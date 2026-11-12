@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 212" width="760" height="212" role="img" aria-label="Terminal: cd my-project, then ultraclaude, which opens the window for that folder">
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace; font-size: 16px; }
+    .fg { fill: #e7e9eb; } .dim { fill: #78808a; } .ok { fill: #46c26d; }
+  </style>
+  <defs>
+    <clipPath id="t1"><rect x="68" y="62" width="130" height="26"><animate attributeName="width" dur="9s" repeatCount="indefinite" calcMode="discrete" values="0;10.6;20.2;29.8;39.4;49;58.6;68.2;77.8;87.4;97;106.6;116.2;125.8" keyTimes="0;0.0723;0.0846;0.0969;0.1092;0.1215;0.1338;0.1462;0.1585;0.1708;0.1831;0.1954;0.2077;0.22"/></rect></clipPath>
+    <clipPath id="t2"><rect x="68" y="92" width="110" height="26"><animate attributeName="width" dur="9s" repeatCount="indefinite" calcMode="discrete" values="0;10.6;20.2;29.8;39.4;49;58.6;68.2;77.8;87.4;97;106.6" keyTimes="0;0.3127;0.3255;0.3382;0.3509;0.3636;0.3764;0.3891;0.4018;0.4145;0.4273;0.44"/></rect></clipPath>
+  </defs>
+  <rect x="0.5" y="0.5" width="759" height="211" rx="8" fill="#0a0b0d" stroke="#24282d"/>
+  <line x1="0" y1="40" x2="760" y2="40" stroke="#24282d"/>
+  <text x="24" y="26" class="dim" style="font-size:13px">terminal</text>
+
+  <text x="44" y="81" class="dim">$</text>
+  <text x="68 77.6 87.2 96.8 106.4 116 125.6 135.2 144.8 154.4 164 173.6 183.2" y="81" class="fg" clip-path="url(#t1)">cd my-project</text>
+  <rect x="68" y="66" width="9" height="19" fill="#e7e9eb" opacity="0"><animate attributeName="x" dur="9s" repeatCount="indefinite" calcMode="discrete" values="68;78.6;88.2;97.8;107.4;117;126.6;136.2;145.8;155.4;165;174.6;184.2;193.8" keyTimes="0;0.0723;0.0846;0.0969;0.1092;0.1215;0.1338;0.1462;0.1585;0.1708;0.1831;0.1954;0.2077;0.22"/><animate attributeName="opacity" dur="9s" repeatCount="indefinite" calcMode="discrete" values="1;0" keyTimes="0;0.27"/></rect>
+
+  <text x="44" y="111" class="dim">$<animate attributeName="opacity" dur="9s" repeatCount="indefinite" calcMode="discrete" values="0;1" keyTimes="0;0.28"/></text>
+  <text x="68 77.6 87.2 96.8 106.4 116 125.6 135.2 144.8 154.4 164" y="111" class="fg" clip-path="url(#t2)">ultraclaude</text>
+  <rect x="68" y="96" width="9" height="19" fill="#e7e9eb" opacity="0"><animate attributeName="x" dur="9s" repeatCount="indefinite" calcMode="discrete" values="68;78.6;88.2;97.8;107.4;117;126.6;136.2;145.8;155.4;165;174.6" keyTimes="0;0.3127;0.3255;0.3382;0.3509;0.3636;0.3764;0.3891;0.4018;0.4145;0.4273;0.44"/><animate attributeName="opacity" dur="9s" repeatCount="indefinite" calcMode="discrete" values="0;1;0" keyTimes="0;0.28;0.5"/></rect>
+
+  <g>
+    <animate attributeName="opacity" dur="9s" repeatCount="indefinite" calcMode="linear" values="0;0;1;1" keyTimes="0;0.51;0.54;1"/>
+    <text x="44" y="149" class="fg">UltraClaude is running for ~/my-project</text>
+    <text x="44" y="179" class="dim">window opened  <tspan class="ok">●</tspan> ready for your first agent</text>
+  </g>
+</svg>

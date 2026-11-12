@@ -158,7 +158,7 @@ function buildGraph(w, ht) {
   const n = S.agents.length;
   hub = { x: Math.round(w / 2), y: Math.round(ht / 2) };
   const rx = Math.max(70, Math.min(w / 2 - (compact ? 120 : 225), 330));
-  const ry = Math.max(70, Math.min(ht / 2 - 90, 200));
+  const ry = Math.max(70, Math.min(ht / 2 - 90, 200, rx * 1.2)); // never much taller than wide
   pos.clear();
   gnodes.clear();
   const links = [];
