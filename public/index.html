@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UltraClaude</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23d97757'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>U</text></svg>">
+  <link rel="stylesheet" href="/vendor/xterm.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">U</span><div><strong>UltraClaude</strong><small id="projectPath"></small></div></div>
+    <nav id="nav">
+      <button data-view="dashboard" class="active">Dashboard</button>
+      <button data-view="terminals">Agents <span class="badge" id="navWaiting" hidden></span></button>
+      <button data-view="tasks">Aufgaben <span class="count" id="navTasks"></span></button>
+      <button data-view="memory">Memory</button>
+    </nav>
+    <div class="actions">
+      <span class="conn" id="conn" title="Verbindung zum Server"></span>
+      <button class="primary" id="addAgent">+ Agent</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-dashboard" class="view">
+      <div class="tiles" id="tiles"></div>
+      <div class="dash">
+        <div class="card graph-card">
+          <svg id="graph" viewBox="0 0 1000 600" role="img" aria-label="Agents und ihre Verbindungen"></svg>
+          <div class="empty" id="empty" hidden>
+            <h2>Stell dein Team zusammen</h2>
+            <p>Ein Klick startet einen Claude-Code-Agent mit dieser Rolle. Alle teilen dieselbe Memory.</p>
+            <div class="role-grid" id="quickRoles"></div>
+          </div>
+          <div class="legend">
+            <span><i class="dot working"></i>arbeitet</span><span><i class="dot waiting"></i>braucht dich</span>
+            <span><i class="dot idle"></i>bereit</span><span><i class="dot stopped"></i>gestoppt</span>
+          </div>
+        </div>
+        <aside class="card feed-card">
+          <div class="card-head"><h3>Aktivität</h3><label class="check"><input type="checkbox" id="showTools"> Tool-Aufrufe</label></div>
+          <ol id="feed"></ol>
+          <form id="msgForm" class="composer">
+            <select id="msgTo" aria-label="Empfänger"></select>
+            <input id="msgText" placeholder="Nachricht ans Team…" autocomplete="off">
+            <button class="primary">Senden</button>
+          </form>
+        </aside>
+      </div>
+    </section>
+
+    <section id="view-terminals" class="view" hidden>
+      <div class="tabs">
+        <div id="tabs"></div>
+        <button id="gridToggle" title="Alle Agents nebeneinander zeigen">▦ Alle nebeneinander</button>
+      </div>
+      <div id="terms"></div>
+      <div class="empty" id="termsEmpty" hidden><h2>Noch keine Agents</h2><p>Erstelle oben rechts mit „+ Agent“ deinen ersten.</p></div>
+    </section>
+
+    <section id="view-tasks" class="view" hidden>
+      <form id="taskForm" class="composer wide">
+        <input id="taskTitle" placeholder="Neue Aufgabe…" autocomplete="off" required>
+        <select id="taskAssignee" aria-label="Zuweisen an"></select>
+        <button class="primary">Hinzufügen</button>
+      </form>
+      <div class="board" id="board"></div>
+    </section>
+
+    <section id="view-memory" class="view" hidden>
+      <div class="memory">
+        <aside class="card">
+          <input id="noteFilter" placeholder="Notizen durchsuchen…" autocomplete="off">
+          <div id="noteList"></div>
+        </aside>
+        <article class="card" id="noteView">
+          <div class="vault-info">
+            <h2>Gemeinsame Memory</h2>
+            <p>Alle Agents lesen und schreiben in diesen Obsidian-Vault. Du kannst ihn in Obsidian öffnen und selbst Notizen ergänzen.</p>
+            <code id="vaultPath"></code>
+            <div class="row"><button id="openObsidian" class="primary">In Obsidian öffnen</button><button id="openFolder">Ordner öffnen</button></div>
+            <p class="hint">Beim ersten Mal in Obsidian: „Ordner als Vault öffnen“ und den Pfad oben wählen.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="agentDialog">
+    <form method="dialog" id="agentForm">
+      <h2>Neuer Agent</h2>
+      <div class="role-grid" id="roleGrid"></div>
+      <label>Name<input id="fName" maxlength="40" autocomplete="off"></label>
+      <label>Zusätzliche Anweisungen <small>(optional)</small><textarea id="fInstructions" rows="2" placeholder="z.B. Kümmere dich nur um das Frontend."></textarea></label>
+      <label>Erste Aufgabe <small>(optional, wird direkt nach dem Start gesendet)</small><textarea id="fPrompt" rows="2" placeholder="z.B. Schau dir PR #12 an."></textarea></label>
+      <details>
+        <summary>Erweitert</summary>
+        <div class="row">
+          <label>Modell<select id="fModel"><option value="">Standard</option><option>fable</option><option>opus</option><option>sonnet</option><option>haiku</option></select></label>
+          <label>Berechtigungen<select id="fPerm"><option value="">Standard (fragt nach)</option><option value="acceptEdits">Edits automatisch erlauben</option><option value="auto">Auto</option><option value="plan">Nur planen</option></select></label>
+        </div>
+        <label class="check"><input type="checkbox" id="fWorktree"> Eigener Git-Worktree (Agent arbeitet in separater Kopie des Repos)</label>
+      </details>
+      <div class="row end"><button type="button" id="agentCancel">Abbrechen</button><button class="primary" id="agentCreate">Agent starten</button></div>
+    </form>
+  </dialog>
+
+  <div id="toasts"></div>
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
