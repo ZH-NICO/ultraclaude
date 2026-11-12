@@ -79,7 +79,15 @@ let chatData = null;
 let chatPick = null; // { key, id } of the chat shown on the right
 
 const loadChats = guard(async () => {
-  chatData = (await api('GET', '/api/chats')).projects;
+  try {
+    chatData = (await api('GET', '/api/chats')).projects;
+  } catch {
+    setText($('mapSummary'), '');
+    $('mapAxis').replaceChildren();
+    $('mapDetail').replaceChildren();
+    $('mapRows').replaceChildren(h('p', { class: 'none' }, 'The UltraClaude server behind this window is older than the window and cannot list chats yet. Run “ultraclaude” in this folder to update it.'));
+    return;
+  }
   if (!chatPick && chatData[0]) chatPick = { key: chatData[0].key, id: chatData[0].sessions[0].id };
   renderMap();
 });
@@ -687,6 +695,13 @@ function onEvent(e) {
 async function loadState() {
   const st = await api('GET', '/api/state');
   Object.assign(S, { project: st.project, roles: st.roles, tasks: st.tasks, noteCount: st.notes, sessions: st.sessions });
+  // The window always loads the newest interface, the server keeps the code it started with.
+  const outdated = !st.version || st.version !== st.latest;
+  $('updateBar').hidden = !outdated;
+  $('updateBtn').hidden = !st.version;
+  setText($('updateText'), st.version
+    ? 'UltraClaude was updated. Restart to use the new version. Running agents continue their sessions.'
+    : 'The UltraClaude server for this folder is older than this window. Run “ultraclaude” in this folder to update it.');
   renderSessions();
   setText($('projectName'), S.project.name);
   $('projectName').title = S.project.dir;
@@ -750,6 +765,10 @@ $('selStop').addEventListener('click', stopPicked);
 $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('mapBtn').addEventListener('click', () => setView('map'));
+$('updateBtn').addEventListener('click', guard(async () => {
+  await api('POST', '/api/restart', {});
+  halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
+}));
 $('mapFilter').addEventListener('input', renderMap);
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });

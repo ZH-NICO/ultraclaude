@@ -12,6 +12,7 @@ import { Project } from './project.js';
 import { ROLES } from './roles.js';
 import { KNOWLEDGE } from './vault.js';
 import { claudeProjectDir, listAllProjects } from './history.js';
+import { codeVersion } from './version.js';
 import { handleMcp } from './mcp.js';
 import { loadConfig } from './config.js';
 
@@ -83,6 +84,7 @@ function knownToObsidian(dir) {
 export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false } = {}) {
   const project = new Project({ dir, vaultPath });
   const token = crypto.randomBytes(18).toString('hex');
+  const version = process.env.ULTRACLAUDE_TEST_VERSION || codeVersion(); // the code this server runs
   const clients = new Set();
   const broadcast = (msg) => {
     const data = JSON.stringify(msg);
@@ -130,6 +132,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         project: { name: project.name, dir: project.dir, vault: project.vault.root, inObsidian: knownToObsidian(project.vault.root) },
         roles: ROLES.map(({ prompt, ...r }) => r),
         agents: project.views(), tasks: project.state.tasks, events: project.events.slice(-150), notes: noteCount(), sessions: project.sessions(),
+        version, latest: codeVersion(),
       });
     }
     if (route === 'POST /api/agents') return send(res, 200, project.createAgent(body));
@@ -180,6 +183,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       return send(res, 200, { known });
     }
     if (route === 'POST /api/open-vault-folder') { openExternal(project.vault.root); return send(res, 200, { ok: true }); }
+    if (route === 'POST /api/restart') {
+      // The command line notices that this server is out of date, restarts it with the new code,
+      // lets the running agents continue their sessions and opens a new window.
+      spawn(process.execPath, [path.join(ROOT, 'bin', 'ultraclaude.js')], { cwd: project.dir, detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      return send(res, 200, { ok: true });
+    }
     if (route === 'POST /api/shutdown') {
       send(res, 200, { ok: true });
       return void setTimeout(() => close().then(() => process.exit(0)), 100);
@@ -202,7 +211,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         return out ? send(res, 200, out) : send(res, parts[0] === 'mcp' ? 202 : 200);
       }
       if (parts[0] === 'api') {
-        if (url.pathname === '/api/ping') return send(res, 200, { ok: true, dir: project.dir });
+        if (url.pathname === '/api/ping') return send(res, 200, { ok: true, dir: project.dir, version });
         if (req.headers['x-uc-token'] !== token) return send(res, 403, { error: 'Forbidden' });
         return await api(req, res, url);
       }
@@ -239,6 +248,13 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   const actualPort = server.address().port;
   project.endpoint = { port: actualPort, token };
+  // Agents that were running when the previous server was replaced by an update continue right away.
+  const resume = project.state.agents.filter((a) => a.resumeOnStart);
+  for (const a of resume) {
+    delete a.resumeOnStart;
+    project.startAgent(a.id).catch((err) => project.event('error', a.name, `failed to start: ${err.message}`));
+  }
+  if (resume.length) project.save();
   const info = { port: actualPort, token, pid: process.pid, url: `http://127.0.0.1:${actualPort}/?t=${token}` };
   fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify(info));
 

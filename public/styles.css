@@ -142,6 +142,8 @@ nav button.active, .agent.active, .note.active { background: var(--bg-2); color:
 .agent .act:empty { display: none; }
 .side-actions { display: flex; gap: 6px; padding: 10px 8px 0; }
 .side-actions .btn { flex: 1; }
+.update { flex: none; display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 8px; border: 1px solid var(--line-2); border-radius: var(--r); font-size: 12px; color: var(--fg-2); }
+.update .btn { align-self: flex-start; height: 24px; padding: 0 8px; font-size: 12px; }
 .side-foot { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 12px 8px 0; font-size: 12px; color: var(--fg-3); }
 .conn { display: flex; align-items: center; gap: 6px; }
 

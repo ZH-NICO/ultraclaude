@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig } from '../src/config.js';
+import { codeVersion } from '../src/version.js';
 
 const SERVER = fileURLToPath(new URL('../src/server.js', import.meta.url));
 const args = process.argv.slice(2);
@@ -24,15 +25,40 @@ const HELP = `UltraClaude — a team of Claude Code agents with shared Obsidian 
 
   --no-open                 Start the server without opening a window`;
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function running() {
   let info;
   try { info = JSON.parse(fs.readFileSync(infoFile, 'utf8')); } catch { return null; }
   try {
     const res = await fetch(`http://127.0.0.1:${info.port}/api/ping`, { signal: AbortSignal.timeout(1500) });
-    return res.ok ? info : null;
+    if (!res.ok) return null;
+    const ping = await res.json().catch(() => ({}));
+    return { ...info, version: ping.version }; // servers from before version 0.2 report none
   } catch {
     return null;
   }
+}
+
+/** Replaces a server that runs older code. Agents that were running continue their sessions in the new one. */
+async function replace(info) {
+  const base = `http://127.0.0.1:${info.port}`;
+  const headers = { 'x-uc-token': info.token };
+  let runningIds = [];
+  try {
+    const state = await (await fetch(`${base}/api/state`, { headers })).json();
+    runningIds = state.agents.filter((a) => a.state !== 'stopped').map((a) => a.id);
+  } catch { /* nothing to carry over */ }
+  await fetch(`${base}/api/shutdown`, { method: 'POST', headers }).catch(() => {});
+  for (let i = 0; i < 60 && await running(); i++) await sleep(250);
+  await sleep(500);
+  if (!runningIds.length) return;
+  const file = path.join(dataDir, 'state.json');
+  try {
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const a of state.agents) if (runningIds.includes(a.id)) a.resumeOnStart = true;
+    fs.writeFileSync(file, JSON.stringify(state, null, 2));
+  } catch { /* the agents can be started by hand */ }
 }
 
 function openWindow(url) {
@@ -55,6 +81,11 @@ function openWindow(url) {
 
 async function open() {
   let info = await running();
+  if (info && info.version !== codeVersion()) {
+    console.log('UltraClaude was updated. Restarting it for this folder; running agents continue their sessions.');
+    await replace(info);
+    info = null;
+  }
   if (!info) {
     fs.mkdirSync(dataDir, { recursive: true });
     try { fs.unlinkSync(infoFile); } catch { /* no stale file */ }
