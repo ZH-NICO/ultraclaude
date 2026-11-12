@@ -281,8 +281,8 @@ function applyView() {
   const ht = stage.clientHeight;
   if (!w || !ht) return;
   if (!mapView) {
-    const reach = mapRadius + 230; // room for the outermost labels
-    mapView = { x: w / 2, y: ht / 2, k: Math.min(1, Math.min(w, ht) / (2 * reach)) };
+    const reach = mapRadius + 120; // room for the outermost labels
+    mapView = { x: w / 2, y: ht / 2, k: Math.min(1.2, Math.min(w, ht) / (2 * reach)) };
   }
   const world = $('mapWorld');
   world.setAttribute('transform', `translate(${mapView.x.toFixed(1)},${mapView.y.toFixed(1)}) scale(${mapView.k.toFixed(4)})`);

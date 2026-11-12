@@ -1,45 +1,41 @@
 <p align="center">
-  <img src="docs/hero.svg" alt="UltraClaude: several Claude Code agents around one shared memory, exchanging messages" width="100%">
+  <img src="docs/hero.svg" alt="UltraClaude: a team of Claude Code agents around one shared memory, with every chat on your computer on a map around them" width="100%">
 </p>
 
 <p align="center">
-  <b>Run a whole team of Claude Code agents side by side.</b><br>
+  <b>Run a whole team of Claude Code agents in one window.</b><br>
   Every agent has a role. All of them share one memory in Obsidian.<br>
-  They see what the others are doing, message each other and hand work over.
+  They see what the others do, message each other and hand work over.
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-you-get">What you get</a> ·
-  <a href="#shared-memory">Shared memory</a> ·
-  <a href="#earlier-sessions">Earlier sessions</a> ·
+  <a href="#every-chat-on-one-map">The map</a> ·
+  <a href="#shared-memory">Memory</a> ·
+  <a href="#keyboard">Keyboard</a> ·
   <a href="#how-it-works">How it works</a>
 </p>
 
 <p align="center">
   <img src="docs/demo.gif" alt="A minute of work: the Bugfixer fixes a bug and saves the cause to memory, tells the Tester, the PR Reviewer asks for permission" width="100%">
   <br>
-  <sub>The real interface. Recorded with scripted demo agents, so no tokens were harmed.</sub>
+  <sub>The real interface, recorded with scripted demo agents.</sub>
 </p>
 
 ## Why
 
-One Claude Code window does one thing at a time. But a pull request is waiting for review while a bug needs fixing and somebody should really write that ticket.
+One Claude Code window does one thing at a time. But a pull request is waiting for review while a bug needs fixing and somebody should write that ticket.
 
-UltraClaude opens as many Claude Code sessions as you want for the same project and turns them into a team:
+UltraClaude opens as many Claude Code sessions as you want for the same project and turns them into a team.
 
-- **Roles.** Bugfixer, Developer, PR Reviewer, Tester, Ticket Writer, Architect, Docs Writer, Coordinator, or one you describe yourself.
-- **One memory.** What one agent learns, every agent knows. It lives in an Obsidian vault you can read and edit.
-- **They talk.** Agents message each other, hand work over and tell you when they are done or stuck.
-- **You see everything.** One window shows who is working, who is idle and who is waiting for you.
+<p align="center">
+  <img src="docs/features.svg" alt="Roles, one shared memory, agents that talk, a map of every chat, Ctrl+V for screenshots, a prompt that stays put" width="100%">
+</p>
 
 ## Quick start
 
-<p align="center">
-  <img src="docs/terminal.svg" alt="Terminal: cd my-project, then ultraclaude" width="760">
-</p>
-
-You need [Node.js](https://nodejs.org) 20 or newer and [Claude Code](https://claude.com/claude-code): the `claude` command works in your terminal and you are signed in. Obsidian is optional, because the vault is a normal folder of Markdown files.
+You need [Node.js](https://nodejs.org) 20 or newer and [Claude Code](https://claude.com/claude-code) (the `claude` command works in your terminal and you are signed in). Obsidian is optional, because the vault is a normal folder of Markdown files.
 
 ```bash
 npm install -g github:ZH-NICO/ultraclaude
@@ -52,9 +48,9 @@ cd my-project
 ultraclaude
 ```
 
-A window opens for that folder. Pick a role and your first agent starts.
+A window opens for that folder. Pick a role and your first agent starts. The first time Claude Code runs in a folder, it asks in the agent's terminal whether you trust the folder. Select "Yes" there.
 
-The first time Claude Code runs in a folder, it asks in the agent's terminal whether you trust the folder. Select "Yes" there.
+Run `ultraclaude` again after an update: it replaces the old server and your running agents continue their sessions.
 
 <details>
 <summary>Install from a clone instead</summary>
@@ -76,29 +72,30 @@ npm link
     <td width="50%"><img src="docs/terminals.png" alt="All terminals side by side"></td>
   </tr>
   <tr>
-    <td><b>Overview.</b> Every agent around the shared memory, with its state and what it is doing right now. Messages and memory access move through the graph as they happen. Next to it, the activity feed and a box to message your agents.</td>
-    <td><b>Terminals.</b> The real Claude Code terminals, one at a time or all side by side. The sidebar always shows who is working, idle or waiting for you.</td>
+    <td><b>Overview.</b> Every agent around the shared memory, with its state and what it is doing. Messages and memory access move through the graph as they happen.</td>
+    <td><b>Terminals.</b> The real Claude Code terminals, one at a time or all side by side. Tick agents to open, stop or remove them together, and hide a terminal with <b>−</b>.</td>
   </tr>
   <tr>
     <td><img src="docs/tasks.png" alt="Task board with Open, In progress and Done"></td>
     <td><img src="docs/memory.png" alt="Memory view with a note open"></td>
   </tr>
   <tr>
-    <td><b>Tasks.</b> A board with Open, In progress and Done. You and the agents add tasks. Whoever gets one assigned is told.</td>
-    <td><b>Memory.</b> Every note in the vault, to filter and read, with a jump into Obsidian.</td>
+    <td><b>Tasks.</b> A board with Open, In progress and Done. Whoever gets a task assigned is told.</td>
+    <td><b>Memory.</b> The vault's real folders. Make, edit, move, copy and delete notes right here.</td>
   </tr>
 </table>
 
 Colour only ever means state: green is working, amber needs you. The window follows your system's light or dark theme.
 
-## Working with several agents
+## Every chat on one map
 
-- **Select agents.** Tick the box in front of an agent in the sidebar. A bar appears with **Open together** (just those terminals side by side), **Stop** and **Remove** for the whole selection.
-- **Hide a terminal.** In All terminals every pane has a **−** next to Stop. It takes that terminal out of the view and leaves the agent running. A bar on top shows how many are hidden, with **Show all** to bring them back.
-- **Paste images with Ctrl+V.** Copy a screenshot or a picture and press Ctrl+V in an agent's terminal. The image is attached right away as `[Image #1]`, no file path needed. Text still pastes as usual.
-- **The prompt stays put.** Agents use Claude Code's fullscreen rendering: the prompt and status line stay at the bottom while you scroll the chat with the mouse wheel. To turn it off, set `"tui"` to something other than `"fullscreen"` in your Claude Code settings.
-- **Colours like a normal terminal.** Agents run with full colour, also when UltraClaude itself was started from a shell that has `NO_COLOR` set.
-- **Every chat on one map.** Click **ultraclaude** at the top left. Every Claude Code chat on your computer shows up as a dot: one row per folder, newest on the right, bigger dots for longer chats. Pick one to continue it here, or open its folder in its own UltraClaude window.
+Click **ultraclaude** at the top left. Your drive sits in the middle, every folder on the way to a Claude Code chat spreads out around it, and each chat is a dot in the folder it was opened in. Click any folder to open it, scroll to zoom, drag to move. Pick a chat to continue it, or open its folder in its own UltraClaude window.
+
+<p align="center">
+  <img src="docs/map.gif" alt="The chat map: zooming into code, opening folders, picking a chat" width="100%">
+  <br>
+  <sub>Shown on a made-up drive.</sub>
+</p>
 
 ## Roles
 
@@ -116,6 +113,21 @@ Colour only ever means state: green is working, amber needs you. The window foll
 
 "New agent" also lets you set a name, extra instructions, a first task, the model, the permission mode and a separate git worktree.
 
+## Keyboard
+
+The terminals behave like Windows Terminal.
+
+| Keys | What happens |
+| --- | --- |
+| Ctrl+V, Ctrl+Shift+V | Paste. A screenshot or copied image is attached right away as `[Image #1]`, no file path needed |
+| Ctrl+C | Copies when text is selected, otherwise interrupts Claude |
+| Ctrl+Shift+C | Always copies |
+| Shift+Enter, Ctrl+Enter | New line in the prompt instead of sending |
+| Ctrl+R, Shift+Tab, Esc, … | Go to Claude Code as usual |
+| Ctrl+S, Esc | Save and cancel in the memory editor |
+
+The prompt and status line stay at the bottom while you scroll the chat with the mouse wheel (Claude Code's fullscreen rendering). To turn that off, set `"tui"` to something other than `"fullscreen"` in your Claude Code settings.
+
 ## Shared memory
 
 The default vault is `~/UltraClaudeVault`. Change it with `ultraclaude vault <path>`, for example to a folder inside a vault you already use.
@@ -124,52 +136,35 @@ The default vault is `~/UltraClaudeVault`. Change it with `ultraclaude vault <pa
 UltraClaudeVault/
   Global/                      knowledge for all your projects
   Projects/<project>/
-    Memory/                    what the agents learned: decisions, architecture, gotchas
+    Memory/                    what the agents learned, and what you write yourself
     Claude Code/               what Claude Code had already saved for this folder
     Agents/                    one note per agent with its role and current status
     Tasks/<project> Board.md   the board as a checklist
     Log/2026-01-31.md          journal: who did what, and when
 ```
 
-To see it in Obsidian, choose "Open folder as vault" and pick the vault folder. Notes you write yourself in `Memory/` or `Global/` are found by the agents too.
+To see it in Obsidian, choose "Open folder as vault" and pick the vault folder. In the **Memory** view you can add notes and folders, edit notes (Ctrl+S saves), rename or move, duplicate, copy text or path, and delete. `Agents/`, `Tasks/` and `Claude Code/` are kept up to date by UltraClaude, so they are read-only there; **Copy into Memory** makes an editable copy.
 
-You can also manage it right in UltraClaude. The **Memory** view shows the vault's real folders:
-- **New note** and **New folder** add your own.
-- On a note you can **Edit** it (Ctrl+S saves), **Rename or move** it, **Duplicate** it, **Copy text**, **Copy path**, open it in Obsidian or **Delete** it.
-- Folders can be renamed, moved, and deleted once they are empty.
-- `Agents/`, `Tasks/` and `Claude Code/` are kept up to date by UltraClaude itself, so they are read-only there. **Copy into Memory** makes an editable copy.
-
-## Earlier sessions
-
-Already used Claude Code in a folder? UltraClaude picks that up the moment you open it there.
-
-- **Sessions.** Every earlier Claude Code session of the folder is listed in the sidebar. Click one and it continues as an agent: the same conversation, now with the team tools.
-- **Memory.** The notes Claude Code saved for the folder are mirrored into the vault under `Claude Code/`, next to a list of the earlier sessions. Every agent can search them and they show up in Obsidian.
+Already used Claude Code in a folder? Its earlier sessions are listed in the sidebar and continue as agents with one click, and the notes Claude Code saved for the folder are mirrored into the vault.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  you([You]) --- win[UltraClaude window]
-  win --- srv[Local server<br>127.0.0.1 only]
-  srv --- a1[Bugfixer<br>claude]
-  srv --- a2[Tester<br>claude]
-  srv --- a3[PR Reviewer<br>claude]
-  srv --- vault[(Obsidian vault<br>shared memory)]
-```
+<p align="center">
+  <img src="docs/flow.svg" alt="The window talks to a local server, which runs every agent as a Claude Code process, shares team tools over MCP, hears from them through hooks and keeps the memory in an Obsidian vault" width="100%">
+</p>
 
-- `ultraclaude` starts a small local server for the folder you are in and opens the window. The server listens on `127.0.0.1` only and requires an access token. Closing the window leaves the agents running. The server exits once no window is open and no agent is running, or when you choose Quit.
+- `ultraclaude` starts a small local server for the folder you are in and opens the window. It listens on `127.0.0.1` only and requires an access token. Closing the window leaves the agents running. The server exits once no window is open and no agent is running, or when you choose Quit.
 - Each agent is a regular `claude` process in a pseudo terminal, started with its role prompt.
 - A built-in MCP server gives every agent the team tools: `list_agents`, `send_message`, `read_messages`, `set_status`, `memory_search`, `memory_read`, `memory_write`, `memory_list`, `task_list`, `task_create`, `task_update`.
-- Claude Code hooks report to the window what an agent is doing, and they deliver messages: to a busy agent after its next tool call, to an idle agent as new input.
-- When an agent starts it gets a briefing: who is on the team, the open tasks and the notes already in memory.
-- Only the server writes to the vault, so agents working in parallel do not overwrite each other.
-- A project's state (agents, tasks, messages) lives in `<project>/.ultraclaude/`, which git ignores. A stopped agent continues its session the next time you start it.
+- Claude Code hooks tell the window what an agent is doing, and they deliver messages: to a busy agent after its next tool call, to an idle agent as new input.
+- A new agent gets a briefing: who is on the team, the open tasks and the notes already in memory.
+- The server writes agent-made notes to the vault, so agents working in parallel do not overwrite each other.
+- A project's state lives in `<project>/.ultraclaude/`, which git ignores. A stopped agent continues its session the next time you start it.
 
 ## Commands
 
 ```
-ultraclaude               open the window for the current folder
+ultraclaude               open the window for the current folder (updates an outdated server)
 ultraclaude stop          stop the server and all agents of this folder
 ultraclaude status        is a server running for this folder?
 ultraclaude vault [path]  show or change the vault
@@ -186,7 +181,7 @@ ultraclaude --no-open     start the server without a window
 ## Development
 
 ```bash
-npm test    # vault, messages, tasks, hooks, MCP, sessions and the HTTP API, without real Claude processes
+npm test    # vault, files, messages, tasks, hooks, MCP, sessions, the chat map and the HTTP API
 ```
 
 ```
@@ -194,11 +189,13 @@ bin/ultraclaude.js   command line
 src/server.js        HTTP, WebSocket, MCP endpoint and hook endpoint
 src/project.js       agents, messages, tasks, hook logic
 src/mcp.js           the team tools
-src/vault.js         the Obsidian vault
-src/history.js       earlier Claude Code sessions and memory of a folder
+src/vault.js         the Obsidian vault and its files
+src/history.js       earlier Claude Code sessions, memory and every chat on the computer
 src/roles.js         roles and the agent prompt
 src/hook.js          hook script that Claude Code calls
+src/version.js       tells an outdated server from an up-to-date one
 public/              the interface (no build step)
+docs/                the pictures in this README
 ```
 
 ## License

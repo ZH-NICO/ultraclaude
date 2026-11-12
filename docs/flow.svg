@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" width="1200" height="380" role="img" aria-label="How UltraClaude works: the window talks to a local server; the server runs each agent as a Claude Code process, gives them team tools over MCP, hears from them through hooks, and keeps the shared memory in an Obsidian vault">
+  <style>
+    .sans { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace; }
+    .box { fill: #171a1d; stroke: #373d44; }
+    .box.term { fill: #0a0b0d; }
+    .h { font-size: 15px; font-weight: 600; fill: #e7e9eb; }
+    .s { font-size: 12px; fill: #78808a; }
+    .wire { fill: none; stroke: #373d44; stroke-width: 1.4; }
+    .lbl { font-size: 11.5px; fill: #a0a6ad; }
+    .tag rect { fill: #0f1113; stroke: #24282d; }
+    .live { animation: breathe 1.8s ease-in-out infinite; }
+    @keyframes breathe { 50% { opacity: .4; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+  <rect x=".5" y=".5" width="1199" height="379" rx="14" fill="#0f1113" stroke="#24282d"/>
+
+  <!-- wires -->
+  <path id="w1" class="wire" d="M232,190 L428,190"/>
+  <path id="w2" class="wire" d="M672,170 C730,170 740,92 808,92"/>
+  <path id="w3" class="wire" d="M672,190 L808,190"/>
+  <path id="w4" class="wire" d="M672,210 C730,210 740,288 808,288"/>
+  <path id="w5" class="wire" d="M550,246 L550,300"/>
+
+  <!-- traffic: terminal output to the window, team tools and hooks between server and agents, notes into the vault -->
+  <g fill="#e7e9eb">
+    <circle r="4"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+    <circle r="4" opacity=".6"><animateMotion dur="3s" begin="1.5s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w1"/></animateMotion></circle>
+    <circle r="4"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#w2"/></animateMotion></circle>
+    <circle r="4" fill="#46c26d"><animateMotion dur="2.6s" begin="1.3s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w2"/></animateMotion></circle>
+    <circle r="4"><animateMotion dur="2.2s" begin=".4s" repeatCount="indefinite"><mpath href="#w3"/></animateMotion></circle>
+    <circle r="4" fill="#46c26d"><animateMotion dur="2.2s" begin="1.5s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w3"/></animateMotion></circle>
+    <circle r="4"><animateMotion dur="2.8s" begin=".8s" repeatCount="indefinite"><mpath href="#w4"/></animateMotion></circle>
+    <circle r="4" fill="#dba42a"><animateMotion dur="2.8s" begin="2s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w4"/></animateMotion></circle>
+    <circle r="4"><animateMotion dur="1.8s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle>
+  </g>
+
+  <!-- window -->
+  <rect class="box" x="40" y="128" width="192" height="124" rx="8"/>
+  <rect x="40" y="128" width="192" height="26" rx="8" fill="#1f2327"/><rect x="40" y="146" width="192" height="8" fill="#1f2327"/>
+  <circle cx="56" cy="141" r="3.5" fill="#373d44"/><circle cx="68" cy="141" r="3.5" fill="#373d44"/><circle cx="80" cy="141" r="3.5" fill="#373d44"/>
+  <text x="136" y="190" text-anchor="middle" class="sans h">Window</text>
+  <text x="136" y="210" text-anchor="middle" class="sans s">overview · terminals</text>
+  <text x="136" y="226" text-anchor="middle" class="sans s">tasks · memory · map</text>
+
+  <!-- server -->
+  <rect class="box" x="428" y="134" width="244" height="112" rx="8"/>
+  <text x="550" y="172" text-anchor="middle" class="sans h">Local server</text>
+  <text x="550" y="192" text-anchor="middle" class="mono s">127.0.0.1 · token</text>
+  <g class="mono" font-size="11" fill="#a0a6ad" text-anchor="middle">
+    <text x="550" y="216">MCP team tools · hooks</text>
+    <text x="550" y="232">tasks · messages · briefings</text>
+  </g>
+
+  <!-- agents -->
+  <g class="sans">
+    <rect class="box term" x="808" y="62" width="250" height="60" rx="8"/><circle class="live" cx="830" cy="92" r="5" fill="#46c26d"/>
+    <text x="846" y="88" class="h">Bugfixer</text><text x="846" y="106" class="mono s">claude · editing token.ts</text>
+    <rect class="box term" x="808" y="160" width="250" height="60" rx="8"/><circle class="live" cx="830" cy="190" r="5" fill="#46c26d"/>
+    <text x="846" y="186" class="h">Tester</text><text x="846" y="204" class="mono s">claude · $ npm test</text>
+    <rect class="box term" x="808" y="258" width="250" height="60" rx="8"/><circle cx="830" cy="288" r="5" fill="#dba42a"/>
+    <text x="846" y="284" class="h">PR Reviewer</text><text x="846" y="302" class="mono s" fill="#dba42a">claude · needs you</text>
+    <text x="1080" y="196" class="sans s">…as many</text><text x="1080" y="212" class="sans s">as you like</text>
+  </g>
+
+  <!-- vault -->
+  <rect class="box" x="462" y="300" width="176" height="56" rx="8"/>
+  <text x="550" y="324" text-anchor="middle" class="sans h">Obsidian vault</text>
+  <text x="550" y="342" text-anchor="middle" class="sans s">one shared memory</text>
+
+  <!-- labels on the wires -->
+  <g class="sans lbl">
+    <g class="tag"><rect x="270" y="166" width="120" height="22" rx="11"/><text x="330" y="181" text-anchor="middle">terminals · events</text></g>
+    <g class="tag"><rect x="690" y="110" width="98" height="22" rx="11"/><text x="739" y="125" text-anchor="middle">MCP tools</text></g>
+    <g class="tag"><rect x="690" y="292" width="98" height="22" rx="11"/><text x="739" y="307" text-anchor="middle">hooks</text></g>
+    <g class="tag"><rect x="570" y="262" width="92" height="22" rx="11"/><text x="616" y="277" text-anchor="middle">notes</text></g>
+  </g>
+  <text x="40" y="42" class="sans" font-size="13" font-weight="600" fill="#a0a6ad" letter-spacing=".6">HOW IT FITS TOGETHER</text>
+  <text x="40" y="64" class="sans s">Everything runs on your computer. Each agent is a normal Claude Code session.</text>
+</svg>

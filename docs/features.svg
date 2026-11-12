@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" width="1200" height="600" role="img" aria-label="Six things UltraClaude does: roles, one shared memory, agents that message each other, a map of every chat, pasting images with Ctrl+V, and a prompt that stays put while you scroll">
+  <defs>
+    <clipPath id="c1"><rect x="0" y="0" width="380" height="290" rx="12"/></clipPath>
+    <clipPath id="scrollbox"><rect x="24" y="24" width="332" height="150" rx="6"/></clipPath>
+  </defs>
+  <style>
+    .sans { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace; }
+    .card { fill: #0f1113; stroke: #24282d; }
+    .title { font-size: 17px; font-weight: 600; fill: #e7e9eb; }
+    .desc { font-size: 13px; fill: #a0a6ad; }
+    .fg { fill: #e7e9eb; } .dim { fill: #a0a6ad; } .faint { fill: #78808a; }
+    .panel { fill: #171a1d; stroke: #24282d; }
+    .term { fill: #0a0b0d; stroke: #24282d; }
+    .line { stroke: #373d44; stroke-width: 1.2; fill: none; }
+    .green { fill: #46c26d; } .amber { fill: #dba42a; }
+    .loop { animation-duration: 8s; animation-iteration-count: infinite; animation-timing-function: ease-in-out; }
+
+    /* 1 roles */
+    .role { opacity: 0; animation: roleIn 8s infinite; }
+    .role:nth-of-type(2) { animation-delay: .5s; } .role:nth-of-type(3) { animation-delay: 1s; } .role:nth-of-type(4) { animation-delay: 1.5s; } .role:nth-of-type(5) { animation-delay: 2s; } .role:nth-of-type(6) { animation-delay: 2.5s; }
+    @keyframes roleIn { 0% { opacity: 0; transform: translateY(6px); } 8%, 88% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
+    .blink { animation: breathe 1.8s ease-in-out infinite; }
+    @keyframes breathe { 50% { opacity: .35; } }
+
+    /* 2 memory */
+    .note { animation: noteIn 8s infinite; opacity: 0; }
+    .note.n2 { animation-delay: 1.3s; } .note.n3 { animation-delay: 2.6s; }
+    @keyframes noteIn { 0% { opacity: 0; transform: translate(0, 0); } 6% { opacity: 1; } 22% { opacity: 1; transform: translate(var(--dx), var(--dy)) scale(.6); } 26%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(.4); } }
+    .count { opacity: 0; animation: count 8s steps(1) infinite; }
+    .c3 { animation-name: c3; } .c4 { animation-name: c4; } .c5 { animation-name: c5; } .c6 { animation-name: c6; }
+    @keyframes c3 { 0%, 21% { opacity: 1; } 21.1%, 100% { opacity: 0; } }
+    @keyframes c4 { 0%, 21% { opacity: 0; } 21.1%, 37% { opacity: 1; } 37.1%, 100% { opacity: 0; } }
+    @keyframes c5 { 0%, 37% { opacity: 0; } 37.1%, 53% { opacity: 1; } 53.1%, 100% { opacity: 0; } }
+    @keyframes c6 { 0%, 53% { opacity: 0; } 53.1%, 100% { opacity: 1; } }
+
+    /* 3 messages */
+    .bubble { opacity: 0; animation: bub 8s infinite; }
+    .bubble.reply { animation-delay: 3.2s; }
+    @keyframes bub { 0% { opacity: 0; transform: translateY(8px); } 6%, 34% { opacity: 1; transform: none; } 42%, 100% { opacity: 0; } }
+
+    /* 4 map */
+    .branch { stroke-dasharray: 160; stroke-dashoffset: 160; animation: draw 8s infinite; }
+    @keyframes draw { 0% { stroke-dashoffset: 160; } 30%, 90% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 160; } }
+    .pop { opacity: 0; animation: pop 8s infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes pop { 0%, 25% { opacity: 0; transform: scale(.2); } 32%, 90% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+
+    /* 5 paste */
+    .key { animation: press 8s infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes press { 0%, 18% { transform: none; } 21% { transform: translateY(3px); } 24%, 100% { transform: none; } }
+    .attach { opacity: 0; animation: attach 8s infinite; }
+    @keyframes attach { 0%, 24% { opacity: 0; } 28%, 92% { opacity: 1; } 100% { opacity: 0; } }
+    .typing { animation: typing 8s steps(20) infinite; }
+    @keyframes typing { 0%, 30% { width: 0; } 60%, 92% { width: 180px; } 100% { width: 0; } }
+
+    /* 6 pinned prompt */
+    .chatlines { animation: scrollup 8s ease-in-out infinite; }
+    @keyframes scrollup { 0%, 15% { transform: translateY(0); } 55%, 70% { transform: translateY(96px); } 95%, 100% { transform: translateY(0); } }
+    .wheel { animation: wheel 8s ease-in-out infinite; }
+    @keyframes wheel { 0%, 15% { transform: translateY(0); opacity: .4; } 35% { transform: translateY(-6px); opacity: 1; } 55%, 100% { transform: translateY(0); opacity: .4; } }
+
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } .role, .bubble, .attach, .pop, .count.c6 { opacity: 1; } .branch { stroke-dashoffset: 0; } }
+  </style>
+
+  <!-- 1 · Roles -->
+  <g transform="translate(0 0)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <g class="sans" font-size="13">
+      <g class="role"><rect class="panel" x="24" y="26" width="150" height="30" rx="6"/><circle class="green blink" cx="40" cy="41" r="4"/><text x="52" y="45" class="fg">Bugfixer</text><text x="160" y="45" text-anchor="end" class="faint mono" font-size="11">working</text></g>
+      <g class="role"><rect class="panel" x="186" y="26" width="170" height="30" rx="6"/><circle class="amber" cx="202" cy="41" r="4"/><text x="214" y="45" class="fg">Reviewer</text><text x="342" y="45" text-anchor="end" class="mono" font-size="11" fill="#dba42a">needs you</text></g>
+      <g class="role"><rect class="panel" x="24" y="66" width="150" height="30" rx="6"/><circle class="green blink" cx="40" cy="81" r="4"/><text x="52" y="85" class="fg">Tester</text><text x="160" y="85" text-anchor="end" class="faint mono" font-size="11">working</text></g>
+      <g class="role"><rect class="panel" x="186" y="66" width="170" height="30" rx="6"/><circle cx="202" cy="81" r="4" fill="none" stroke="#78808a" stroke-width="1.5"/><text x="214" y="85" class="fg">Ticket Writer</text><text x="342" y="85" text-anchor="end" class="faint mono" font-size="11">idle</text></g>
+      <g class="role"><rect class="panel" x="24" y="106" width="150" height="30" rx="6"/><circle cx="40" cy="121" r="4" fill="none" stroke="#78808a" stroke-width="1.5"/><text x="52" y="125" class="fg">Architect</text><text x="160" y="125" text-anchor="end" class="faint mono" font-size="11">idle</text></g>
+      <g class="role"><rect class="panel" x="186" y="106" width="170" height="30" rx="6" stroke-dasharray="4 3"/><text x="271" y="125" text-anchor="middle" class="dim">+ your own role</text></g>
+    </g>
+    <text x="24" y="226" class="sans title">Give every agent a role</text>
+    <text x="24" y="250" class="sans desc">Bugfixer, reviewer, tester, ticket writer,</text>
+    <text x="24" y="268" class="sans desc">architect, docs, coordinator, or your own.</text>
+  </g>
+
+  <!-- 2 · Shared memory -->
+  <g transform="translate(410 0)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <rect class="panel" x="230" y="54" width="122" height="96" rx="8"/>
+    <text x="291" y="92" text-anchor="middle" class="sans" font-size="15" font-weight="600" fill="#e7e9eb">Memory</text>
+    <g class="mono faint" font-size="12" text-anchor="middle">
+      <text class="count c3" x="291" y="114">3 notes</text><text class="count c4" x="291" y="114">4 notes</text>
+      <text class="count c5" x="291" y="114">5 notes</text><text class="count c6" x="291" y="114">6 notes</text>
+    </g>
+    <g class="sans" font-size="12">
+      <g class="note" style="--dx: 210px; --dy: 30px"><rect class="panel" x="24" y="40" width="148" height="28" rx="5"/><text x="36" y="58" class="dim">Login bug 42</text></g>
+      <g class="note n2" style="--dx: 210px; --dy: -8px"><rect class="panel" x="24" y="88" width="148" height="28" rx="5"/><text x="36" y="106" class="dim">Auth architecture</text></g>
+      <g class="note n3" style="--dx: 210px; --dy: -46px"><rect class="panel" x="24" y="136" width="148" height="28" rx="5"/><text x="36" y="154" class="dim">Test commands</text></g>
+    </g>
+    <text x="24" y="226" class="sans title">One memory for the whole team</text>
+    <text x="24" y="250" class="sans desc">What one agent learns, all of them know.</text>
+    <text x="24" y="268" class="sans desc">Plain Markdown in an Obsidian vault.</text>
+  </g>
+
+  <!-- 3 · They talk -->
+  <g transform="translate(820 0)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <line class="line" x1="60" y1="150" x2="320" y2="150"/>
+    <circle cx="60" cy="150" r="9" class="green blink" stroke="#46c26d"/><text x="60" y="180" text-anchor="middle" class="sans" font-size="13" font-weight="600" fill="#e7e9eb">Bugfixer</text>
+    <circle cx="320" cy="150" r="9" class="green blink" stroke="#46c26d"/><text x="320" y="180" text-anchor="middle" class="sans" font-size="13" font-weight="600" fill="#e7e9eb">Tester</text>
+    <circle r="5" fill="#e7e9eb"><animateMotion dur="8s" repeatCount="indefinite" path="M60,150 L320,150" keyPoints="0;0;1;1" keyTimes="0;.06;.2;1" calcMode="linear"/><animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;1;1;0;0" keyTimes="0;.06;.2;.21;1"/></circle>
+    <circle r="5" fill="#e7e9eb"><animateMotion dur="8s" repeatCount="indefinite" path="M320,150 L60,150" keyPoints="0;0;1;1" keyTimes="0;.46;.6;1" calcMode="linear"/><animate attributeName="opacity" dur="8s" repeatCount="indefinite" values="0;0;1;1;0;0" keyTimes="0;.46;.47;.6;.61;1"/></circle>
+    <g class="bubble"><rect class="panel" x="24" y="40" width="250" height="52" rx="8"/><text x="38" y="62" class="sans" font-size="12" font-weight="600" fill="#e7e9eb">Bugfixer → Tester</text><text x="38" y="80" class="sans dim" font-size="12">Fix for #42 is in. Run the auth tests?</text></g>
+    <g class="bubble reply"><rect class="panel" x="106" y="40" width="250" height="52" rx="8"/><text x="120" y="62" class="sans" font-size="12" font-weight="600" fill="#e7e9eb">Tester → Bugfixer</text><text x="120" y="80" class="sans dim" font-size="12">48 passed. Nice catch.</text></g>
+    <text x="24" y="226" class="sans title">They talk to each other</text>
+    <text x="24" y="250" class="sans desc">Messages, hand-overs and a shared task board,</text>
+    <text x="24" y="268" class="sans desc">delivered while they work.</text>
+  </g>
+
+  <!-- 4 · Every chat on a map -->
+  <g transform="translate(0 310)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <g transform="translate(190 100)">
+      <path class="line branch" d="M0,0 C0,-40 -80,-40 -120,-55"/><path class="line branch" d="M0,0 C30,-40 90,-40 120,-60"/>
+      <path class="line branch" d="M0,0 C-40,20 -100,30 -140,40"/><path class="line branch" d="M0,0 C40,20 100,30 145,35"/>
+      <path class="line branch" d="M0,0 C0,30 -20,50 -30,70"/><path class="line branch" d="M0,0 C10,30 40,50 60,70"/>
+      <g fill="#a0a6ad"><circle class="pop" cx="-120" cy="-55" r="4"/><circle class="pop" cx="120" cy="-60" r="5"/><circle class="pop" cx="-140" cy="40" r="3.5"/><circle class="pop" cx="145" cy="35" r="6"/><circle class="pop" cx="-30" cy="70" r="4"/><circle class="pop" cx="60" cy="70" r="3.5"/></g>
+      <g class="sans" font-size="11" fill="#78808a"><text class="pop" x="-112" y="-62">shop-api</text><text class="pop" x="80" y="-70">design-system</text><text class="pop" x="-176" y="60">notes</text><text class="pop" x="112" y="54">infra</text></g>
+      <rect x="-30" y="-16" width="60" height="32" rx="5" fill="#171a1d" stroke="#373d44"/><text x="0" y="5" text-anchor="middle" class="mono" font-size="14" font-weight="600" fill="#e7e9eb">C:\</text>
+    </g>
+    <text x="24" y="226" class="sans title">Every chat on one map</text>
+    <text x="24" y="250" class="sans desc">Your drive in the middle, every Claude Code chat</text>
+    <text x="24" y="268" class="sans desc">in its folder. Pick one and continue it.</text>
+  </g>
+
+  <!-- 5 · Paste images -->
+  <g transform="translate(410 310)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <rect class="term" x="24" y="24" width="332" height="90" rx="6"/>
+    <text x="40" y="64" class="mono fg" font-size="14">❯</text>
+    <g class="attach"><rect x="58" y="49" width="84" height="22" rx="4" fill="#24282d"/><text x="100" y="64" text-anchor="middle" class="mono" font-size="12" fill="#e7e9eb">[Image #1]</text></g>
+    <clipPath id="tclip"><rect class="typing" x="150" y="48" width="0" height="24"/></clipPath>
+    <text x="150" y="64" class="mono dim" font-size="13" clip-path="url(#tclip)">why is this cut off?</text>
+    <g transform="translate(125 132)"><g class="key">
+      <rect x="0" y="0" width="58" height="40" rx="7" fill="#171a1d" stroke="#373d44"/><text x="29" y="25" text-anchor="middle" class="sans" font-size="14" fill="#e7e9eb">Ctrl</text>
+      <text x="74" y="25" text-anchor="middle" class="sans faint" font-size="16">+</text>
+      <rect x="90" y="0" width="40" height="40" rx="7" fill="#171a1d" stroke="#373d44"/><text x="110" y="25" text-anchor="middle" class="sans" font-size="14" fill="#e7e9eb">V</text>
+    </g></g>
+    <text x="24" y="226" class="sans title">Paste screenshots with Ctrl+V</text>
+    <text x="24" y="250" class="sans desc">Images attach straight away. No file paths.</text>
+    <text x="24" y="268" class="sans desc">Copy, paste and new lines work as you expect.</text>
+  </g>
+
+  <!-- 6 · Prompt stays put -->
+  <g transform="translate(820 310)">
+    <rect class="card" x=".5" y=".5" width="379" height="289" rx="12"/>
+    <rect class="term" x="24" y="24" width="332" height="150" rx="6"/>
+    <g clip-path="url(#scrollbox)">
+      <g class="chatlines mono" font-size="12">
+        <text x="40" y="-60" class="dim">● Read src/auth/token.ts</text>
+        <text x="40" y="-36" class="dim">● Update src/auth/token.ts</text>
+        <text x="40" y="-12" class="faint">  - if (expiresAt &lt; now)</text>
+        <text x="40" y="12" fill="#46c26d">  + if (expiresAt &lt;= now)</text>
+        <text x="40" y="36" class="dim">● Bash npm test -- auth</text>
+        <text x="40" y="60" fill="#46c26d">  48 passed</text>
+        <text x="40" y="84" class="dim">● Saved "Login bug 42"</text>
+        <text x="40" y="108" class="fg">Fixed. Tokens refresh in time.</text>
+      </g>
+    </g>
+    <rect x="24" y="120" width="332" height="54" fill="#0a0b0d"/>
+    <line x1="34" y1="122" x2="346" y2="122" stroke="#373d44"/>
+    <text x="40" y="142" class="mono fg" font-size="13">❯</text>
+    <text x="40" y="164" class="mono" font-size="11" fill="#dba42a">⏵⏵ auto mode on</text>
+    <g transform="translate(330 60)"><g class="wheel"><rect x="-6" y="-12" width="12" height="22" rx="6" fill="none" stroke="#78808a"/><line x1="0" y1="-7" x2="0" y2="-2" stroke="#78808a"/></g></g>
+    <text x="24" y="226" class="sans title">The prompt stays put</text>
+    <text x="24" y="250" class="sans desc">Scroll back through the chat while the prompt</text>
+    <text x="24" y="268" class="sans desc">and status line stay where they are.</text>
+  </g>
+</svg>
