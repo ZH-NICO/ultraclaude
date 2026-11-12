@@ -1,0 +1,96 @@
+// Earlier Claude Code sessions and Claude Code's own memory notes, read from a fake ~/.claude.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `uc-${name}-`));
+process.env.CLAUDE_CONFIG_DIR = tmp('claude');
+const { claudeProjectDir, listSessions } = await import('../src/history.js');
+const { startServer } = await import('../src/server.js');
+
+const line = (o) => `${JSON.stringify(o)}\n`;
+const user = (text, extra = {}) => line({ type: 'user', message: { role: 'user', content: text }, cwd: 'x', ...extra });
+
+function writeSession(dir, id, lines, ageMinutes) {
+  const root = claudeProjectDir(dir);
+  fs.mkdirSync(root, { recursive: true });
+  const file = path.join(root, `${id}.jsonl`);
+  fs.writeFileSync(file, lines.join(''));
+  const when = new Date(Date.now() - ageMinutes * 60000);
+  fs.utimesSync(file, when, when);
+}
+
+const A = '11111111-1111-4111-8111-111111111111';
+const B = '22222222-2222-4222-8222-222222222222';
+const C = '33333333-3333-4333-8333-333333333333';
+const D = '44444444-4444-4444-8444-444444444444';
+
+test('sessions and Claude Code memory of a folder show up and can be continued', async (t) => {
+  const dir = tmp('proj');
+  assert.equal(path.basename(claudeProjectDir('C:\\Work\\my app_1')), 'C--Work-my-app-1');
+  assert.deepEqual(listSessions(dir), [], 'a folder Claude Code never saw has no sessions');
+
+  // A: titled by Claude, first line is a slash command; the transcript is larger than one read chunk
+  writeSession(dir, A, [
+    user('<command-name>/mcp</command-name>', { isMeta: true }),
+    user('Fix the login bug\nplease'),
+    line({ type: 'ai-title', aiTitle: 'Old title' }),
+    line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(700_000) }] } }),
+    line({ type: 'ai-title', aiTitle: 'Fix login bug' }),
+  ], 30);
+  // B: no title yet, prompt given as content blocks
+  writeSession(dir, B, [line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'Write the changelog for 2.0' }] } })], 5);
+  // C: named by hand, which wins over Claude's title
+  writeSession(dir, C, [user('hello'), line({ type: 'ai-title', aiTitle: 'Greeting' }), line({ type: 'custom-title', customTitle: 'Release prep' })], 600);
+  // D: nothing a person typed, so it is not worth showing
+  writeSession(dir, D, [user('<command-name>/clear</command-name>'), user('[UltraClaude message] from Tester: hi')], 1);
+  fs.writeFileSync(path.join(claudeProjectDir(dir), 'not-a-session.jsonl'), 'x');
+
+  const sessions = listSessions(dir);
+  assert.deepEqual(sessions.map((s) => s.title), ['Write the changelog for 2.0', 'Fix login bug', 'Release prep']);
+  assert.equal(sessions[1].firstPrompt, 'Fix the login bug please');
+  assert.equal(sessions[1].id, A);
+
+  // Claude Code's own memory for the folder
+  const memory = path.join(claudeProjectDir(dir), 'memory');
+  fs.mkdirSync(memory);
+  fs.writeFileSync(path.join(memory, 'MEMORY.md'), '- [Deploy](deploy.md)\n');
+  fs.writeFileSync(path.join(memory, 'deploy.md'), '---\nname: deploy\n---\n\nDeploys go through the staging pipeline first.\n');
+
+  const app = await startServer({ dir, vaultPath: tmp('v') });
+  t.after(() => app.close());
+  const { project } = app;
+  const startedWith = [];
+  project.startAgent = async (id) => { startedWith.push(project.agent(id)); };
+  const api = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+
+  // memory: mirrored into the vault, counted, searchable by agents, index file left out
+  const mirror = path.join(project.vault.projectDir, 'Claude Code');
+  assert.deepEqual(fs.readdirSync(mirror).sort(), ['Earlier sessions.md', 'deploy.md']);
+  assert.match(fs.readFileSync(path.join(mirror, 'Earlier sessions.md'), 'utf8'), /\*\*Fix login bug\*\* — began with: “Fix the login bug please”/);
+  let state = await api('GET', '/api/state');
+  assert.equal(state.notes, 2);
+  assert.equal(project.vault.search('staging pipeline')[0].kind, 'Claude Code');
+  assert.equal(project.vault.read('deploy').kind, 'Claude Code');
+
+  // sessions: listed right away, continuing one turns it into an agent that resumes that session
+  assert.deepEqual(state.sessions.map((s) => s.id), [B, A, C]);
+  const agent = await api('POST', '/api/agents', { sessionId: A });
+  assert.equal(agent.name, 'Fix login bug');
+  assert.deepEqual([startedWith[0].sessionId, startedWith[0].started, startedWith[0].imported], [A, true, true]);
+  state = await api('GET', '/api/state');
+  assert.deepEqual(state.sessions.map((s) => s.id), [B, C], 'a session that is open as an agent leaves the list');
+  assert.equal((await api('POST', '/api/agents', { sessionId: A })).error, 'That session is not available any more.');
+  assert.match(project.handleHook(agent.id, { hook_event_name: 'SessionStart' }).hookSpecificOutput.additionalContext, /Team protocol[\s\S]*deploy/, 'an imported session is told the team protocol and sees the notes');
+
+  // the mirror follows the source: changed notes are refreshed, deleted ones disappear
+  fs.rmSync(path.join(memory, 'deploy.md'));
+  fs.writeFileSync(path.join(memory, 'style.md'), 'Tabs, not spaces.\n');
+  await api('GET', '/api/notes');
+  assert.deepEqual(fs.readdirSync(mirror).sort(), ['Earlier sessions.md', 'style.md']);
+
+  await api('DELETE', `/api/agents/${agent.id}`);
+  assert.deepEqual((await api('GET', '/api/state')).sessions.map((s) => s.id), [B, A, C], 'removing the agent puts its session back');
+});

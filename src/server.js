@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { Project } from './project.js';
 import { ROLES } from './roles.js';
+import { KNOWLEDGE } from './vault.js';
 import { handleMcp } from './mcp.js';
 import { loadConfig } from './config.js';
 
@@ -73,13 +74,14 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const data = JSON.stringify(msg);
     for (const ws of clients) if (ws.readyState === 1) ws.send(data);
   };
-  const noteCount = () => project.vault.list(['Memory', 'Global']).length;
+  const noteCount = () => project.vault.list(KNOWLEDGE).length;
 
   project.on('agents', (agents) => broadcast({ t: 'agents', agents }));
   project.on('tasks', (tasks) => broadcast({ t: 'tasks', tasks }));
   project.on('event', (e) => broadcast({ t: 'event', e }));
   project.on('notes', () => broadcast({ t: 'notes', count: noteCount() }));
   project.on('pty', (id, d) => broadcast({ t: 'out', id, d }));
+  project.on('sessions', () => broadcast({ t: 'sessions', sessions: project.sessions() }));
 
   const send = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -103,10 +105,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const idMatch = /^\/api\/(agents|tasks)\/([^/]+)(?:\/(start|stop))?$/.exec(url.pathname);
 
     if (route === 'GET /api/state') {
+      project.syncClaudeCode();
       return send(res, 200, {
         project: { name: project.name, dir: project.dir, vault: project.vault.root, inObsidian: knownToObsidian(project.vault.root) },
         roles: ROLES.map(({ prompt, ...r }) => r),
-        agents: project.views(), tasks: project.state.tasks, events: project.events.slice(-150), notes: noteCount(),
+        agents: project.views(), tasks: project.state.tasks, events: project.events.slice(-150), notes: noteCount(), sessions: project.sessions(),
       });
     }
     if (route === 'POST /api/agents') return send(res, 200, project.createAgent(body));
@@ -123,7 +126,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       if (req.method === 'PATCH') return send(res, 200, project.updateTask('user', idMatch[2], body));
       if (req.method === 'DELETE') { project.deleteTask(idMatch[2]); return send(res, 200, { ok: true }); }
     }
-    if (route === 'GET /api/notes') return send(res, 200, project.vault.list());
+    if (route === 'GET /api/notes') { project.syncClaudeCode(); return send(res, 200, project.vault.list()); }
     if (route === 'GET /api/note') {
       const note = project.vault.read(url.searchParams.get('path'));
       return note ? send(res, 200, note) : send(res, 404, { error: 'Note not found' });

@@ -10,6 +10,7 @@ import { startServer } from '../src/server.js';
 import { describeTool } from '../src/project.js';
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `uc-${name}-`));
+process.env.CLAUDE_CONFIG_DIR = tmp('claude'); // never read the real ~/.claude in tests
 
 test('vault: write, append, read, search, path safety', () => {
   const v = new Vault(tmp('vault'), 'demo');

@@ -1,4 +1,6 @@
 // Minimal MCP server (Streamable HTTP, JSON responses) that gives every agent the team tools.
+import { KNOWLEDGE } from './vault.js';
+
 const str = (description) => ({ type: 'string', description });
 
 const TOOLS = [
@@ -64,7 +66,7 @@ function callTool(project, agent, name, args = {}) {
       return `Saved to shared memory: ${res.path}`;
     }
     case 'memory_list': {
-      const notes = project.vault.list(['Memory', 'Global']);
+      const notes = project.vault.list(KNOWLEDGE);
       return notes.length ? notes.map((n) => `- ${n.title} [${n.kind}]${n.tags.length ? ` (${n.tags.join(', ')})` : ''} — ${n.excerpt.slice(0, 90)}`).join('\n') : 'Shared memory is empty.';
     }
     case 'task_list':

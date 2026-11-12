@@ -5,7 +5,7 @@ const VIEWS = ['overview', 'agents', 'tasks', 'memory'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
+const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, sessions: [], allSessions: false, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
 let ws;
 let halted = false;
 
@@ -52,6 +52,13 @@ const cut = (s, n) => (s && s.length > n ? `${s.slice(0, n - 1)}…` : s || '');
 const clock = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 const agentBy = (ref) => S.agents.find((a) => a.id === ref || a.name === ref);
 const busy = (a) => a.state === 'working' || a.state === 'waiting';
+const ago = (ts) => {
+  const min = Math.max(0, Math.round((Date.now() - ts) / 60000));
+  if (min < 60) return `${min}m`;
+  if (min < 60 * 24) return `${Math.round(min / 60)}h`;
+  if (min < 60 * 24 * 14) return `${Math.round(min / 1440)}d`;
+  return new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // ---------- navigation ----------
@@ -99,6 +106,18 @@ function syncSide() {
   $('rosterEmpty').hidden = S.agents.length > 0;
   $('gridBtn').hidden = S.agents.length < 2;
   $('gridBtn').classList.toggle('active', S.view === 'agents' && S.grid);
+}
+
+/** Earlier Claude Code sessions of this folder; a click continues one as an agent. */
+function renderSessions() {
+  const shown = S.allSessions ? S.sessions : S.sessions.slice(0, 5);
+  $('sessionsBox').hidden = !S.sessions.length;
+  $('startSessions').hidden = !S.sessions.length;
+  $('sessions').replaceChildren(...shown.map((s) => h('button', {
+    type: 'button', class: 'session', title: `${s.firstPrompt || s.title}\n\nClick to continue this session here.`, onclick: () => createAgent({ sessionId: s.id }),
+  }, h('span', { class: 'nm' }, s.title), h('span', { class: 'when' }, ago(s.updated)))));
+  $('sessionsMore').hidden = S.sessions.length <= 5;
+  setText($('sessionsMore'), S.allSessions ? 'Show fewer' : `Show all ${S.sessions.length}`);
 }
 
 function syncSummary() {
@@ -364,12 +383,12 @@ function renderTasks() {
 
 // ---------- memory ----------
 
-const GROUPS = [['Memory', 'Project memory'], ['Global', 'Global memory'], ['Tasks', 'Board'], ['Agents', 'Agents'], ['Log', 'Journal'], ['Project', 'Project'], ['Vault', 'Other']];
+const GROUPS = [['Memory', 'Project memory'], ['Global', 'Global memory'], ['Claude Code', 'From Claude Code'], ['Tasks', 'Board'], ['Agents', 'Agents'], ['Log', 'Journal'], ['Project', 'Project'], ['Vault', 'Other']];
 let vaultInfo;
 
 async function loadNotes() {
   try { S.notes = await api('GET', '/api/notes'); } catch { return; }
-  S.noteCount = S.notes.filter((n) => n.kind === 'Memory' || n.kind === 'Global').length;
+  S.noteCount = S.notes.filter((n) => ['Memory', 'Global', 'Claude Code'].includes(n.kind)).length;
   renderNotes();
   syncSide();
 }
@@ -505,7 +524,8 @@ function onEvent(e) {
 
 async function loadState() {
   const st = await api('GET', '/api/state');
-  Object.assign(S, { project: st.project, roles: st.roles, tasks: st.tasks, noteCount: st.notes });
+  Object.assign(S, { project: st.project, roles: st.roles, tasks: st.tasks, noteCount: st.notes, sessions: st.sessions });
+  renderSessions();
   setText($('projectName'), S.project.name);
   $('projectName').title = S.project.dir;
   setText($('vaultPath'), S.project.vault);
@@ -535,6 +555,7 @@ function connect() {
     } else if (m.t === 'agents') onAgents(m.agents);
     else if (m.t === 'tasks') { S.tasks = m.tasks; renderTasks(); syncSide(); }
     else if (m.t === 'event') onEvent(m.e);
+    else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') loadNotes(); }
   };
   ws.onclose = () => {
@@ -558,6 +579,7 @@ $('nav').addEventListener('click', (ev) => { const b = ev.target.closest('button
 $('showTools').addEventListener('change', (ev) => $('feed').classList.toggle('hide-tools', !ev.target.checked));
 $('gridBtn').addEventListener('click', () => { S.grid = !(S.view === 'agents' && S.grid); setView('agents'); });
 $('noteFilter').addEventListener('input', renderNotes);
+$('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder
 $('openFolder').addEventListener('click', guard(() => api('POST', '/api/open-vault-folder', {})));
 $('addAgent').addEventListener('click', () => {

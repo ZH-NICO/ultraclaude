@@ -29,6 +29,10 @@ const cleanTags = (tags) =>
 const front = (meta) =>
   '---\n' + Object.entries(meta).map(([k, v]) => `${k}: ${Array.isArray(v) ? `[${v.join(', ')}]` : v}`).join('\n') + '\n---\n\n';
 
+/** The kinds of notes that count as knowledge: what agents search and what the note counter shows. */
+export const KNOWLEDGE = ['Memory', 'Global', 'Claude Code'];
+const SESSIONS_NOTE = 'Earlier sessions.md';
+
 export class Vault {
   constructor(root, project) {
     this.root = path.resolve(root);
@@ -36,6 +40,36 @@ export class Vault {
     this.projectDir = path.join(this.root, 'Projects', this.project);
     this.memoryDir = path.join(this.projectDir, 'Memory');
     this.globalDir = path.join(this.root, 'Global');
+    this.importDir = path.join(this.projectDir, 'Claude Code'); // mirror of what Claude Code saved itself
+  }
+
+  /**
+   * Mirrors Claude Code's own memory notes for this folder into the vault, plus a list of the
+   * sessions that ran here. One way only: the folder is rewritten from the source every time.
+   * Returns true when something changed.
+   */
+  mirror(files, sessions) {
+    let changed = false;
+    const keep = new Set(files.map((f) => f.name));
+    if (sessions.length) keep.add(SESSIONS_NOTE);
+    if (fs.existsSync(this.importDir)) {
+      for (const name of fs.readdirSync(this.importDir)) {
+        if (!keep.has(name)) { fs.rmSync(path.join(this.importDir, name), { force: true }); changed = true; }
+      }
+    }
+    if (!keep.size) return changed;
+    fs.mkdirSync(this.importDir, { recursive: true });
+    for (const f of files) {
+      const dest = path.join(this.importDir, f.name);
+      if (!fs.existsSync(dest) || fs.statSync(dest).mtimeMs < f.mtimeMs) { fs.copyFileSync(f.file, dest); changed = true; }
+    }
+    if (sessions.length) {
+      const dest = path.join(this.importDir, SESSIONS_NOTE);
+      const lines = sessions.slice(0, 40).map((s) => `- ${day(new Date(s.updated))} · **${s.title}**${s.firstPrompt && s.firstPrompt !== s.title ? ` — began with: “${s.firstPrompt}”` : ''}`);
+      const text = `# Earlier sessions\n\nClaude Code sessions that ran in this folder before or next to UltraClaude. Open one from the UltraClaude sidebar to continue it.\n\n${lines.join('\n')}\n`;
+      if (!fs.existsSync(dest) || fs.readFileSync(dest, 'utf8') !== text) { fs.writeFileSync(dest, text); changed = true; }
+    }
+    return changed;
   }
 
   ensure(projectPath = '') {
@@ -128,7 +162,7 @@ export class Vault {
     const candidates = [];
     try { candidates.push(this.abs(name.endsWith('.md') ? name : `${name}.md`)); } catch { /* outside vault */ }
     const base = safeName(name.replace(/\.md$/i, '').split('/').pop());
-    candidates.push(path.join(this.memoryDir, `${base}.md`), path.join(this.globalDir, `${base}.md`));
+    candidates.push(path.join(this.memoryDir, `${base}.md`), path.join(this.globalDir, `${base}.md`), path.join(this.importDir, `${base}.md`));
     let file = candidates.find((c) => fs.existsSync(c) && fs.statSync(c).isFile());
     if (!file) {
       const hit = this.list().find((n) => n.title.toLowerCase() === base.toLowerCase());
@@ -141,7 +175,7 @@ export class Vault {
     const terms = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
     const hits = [];
-    for (const file of [...this.#walk(this.memoryDir), ...this.#walk(this.globalDir)]) {
+    for (const file of [...this.#walk(this.memoryDir), ...this.#walk(this.globalDir), ...this.#walk(this.importDir)]) {
       const n = this.#info(file, true);
       const title = n.title.toLowerCase();
       const text = `${n.tags.join(' ')} ${n.body}`.toLowerCase();

@@ -24,12 +24,19 @@
       <button type="button" data-view="memory">Memory<span class="num" id="navNotes"></span></button>
     </nav>
 
-    <h2 class="side-head">Agents</h2>
-    <div id="roster"></div>
-    <p class="side-note" id="rosterEmpty">None yet.</p>
-    <div class="side-actions">
-      <button type="button" class="btn" id="addAgent">New agent</button>
-      <button type="button" class="btn" id="gridBtn" hidden title="Show all terminals side by side">All terminals</button>
+    <div class="side-scroll">
+      <h2 class="side-head">Agents</h2>
+      <div id="roster"></div>
+      <p class="side-note" id="rosterEmpty">None yet.</p>
+      <div class="side-actions">
+        <button type="button" class="btn" id="addAgent">New agent</button>
+        <button type="button" class="btn" id="gridBtn" hidden title="Show all terminals side by side">All terminals</button>
+      </div>
+      <div id="sessionsBox" hidden>
+        <h2 class="side-head" title="Claude Code sessions that already ran in this folder. Click one to continue it here.">Earlier sessions</h2>
+        <div id="sessions"></div>
+        <button type="button" class="link side-more" id="sessionsMore" hidden></button>
+      </div>
     </div>
 
     <div class="side-foot">
@@ -51,6 +58,7 @@
             <h2>No agents yet</h2>
             <p>Pick a role to start your first agent. All agents in this project share one memory, see what the others are doing and can message each other.</p>
             <div class="roles" id="quickRoles"></div>
+            <p class="also" id="startSessions" hidden>Claude Code already ran in this folder. Pick one of the earlier sessions in the sidebar to continue it here with everything it knew.</p>
           </div>
         </div>
         <aside class="feed">

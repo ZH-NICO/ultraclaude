@@ -6,7 +6,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Vault } from './vault.js';
+import { Vault, KNOWLEDGE } from './vault.js';
+import { listSessions, claudeMemoryFiles } from './history.js';
 import { roleById, roleName, buildPrompt } from './roles.js';
 
 const HOOK_SCRIPT = fileURLToPath(new URL('./hook.js', import.meta.url)).replace(/\\/g, '/');
@@ -88,6 +89,22 @@ export class Project extends EventEmitter {
     }
     this.vault.ensure(this.dir);
     for (const a of this.state.agents) this.runtime.set(a.id, this.#freshRuntime());
+    this.syncClaudeCode();
+  }
+
+  // ---------- what Claude Code already has for this folder ----------
+
+  /** Earlier Claude Code sessions of this folder that are not open as an agent right now. */
+  sessions() {
+    const open = new Set(this.state.agents.map((a) => a.sessionId));
+    return listSessions(this.dir).filter((s) => !open.has(s.id)).slice(0, 60);
+  }
+
+  /** Brings Claude Code's own memory notes and session list for this folder into the vault. */
+  syncClaudeCode() {
+    try {
+      if (this.vault.mirror(claudeMemoryFiles(this.dir), listSessions(this.dir))) this.emit('notes');
+    } catch { /* vault or Claude Code folder unavailable */ }
   }
 
   // ---------- state helpers ----------
@@ -141,19 +158,23 @@ export class Project extends EventEmitter {
 
   // ---------- agents ----------
 
-  createAgent({ roleId = 'custom', name, instructions = '', model = '', permissionMode = '', worktree = false, prompt = '' }) {
+  /** With `sessionId` the agent continues an earlier Claude Code session instead of starting a new one. */
+  createAgent({ roleId = 'custom', name, instructions = '', model = '', permissionMode = '', worktree = false, prompt = '', sessionId = '' }) {
     const role = roleById(roleId);
-    const wanted = short(name || (role.id === 'custom' ? 'Agent' : role.name), 40).replace(/["\r\n]/g, '');
+    const session = sessionId ? this.sessions().find((s) => s.id === sessionId) : null;
+    if (sessionId && !session) throw new Error('That session is not available any more.');
+    const wanted = short(name || session?.title || (role.id === 'custom' ? 'Agent' : role.name), 40).replace(/["\r\n]/g, '');
     let unique = wanted;
     for (let i = 2; this.agent(unique) || RESERVED_NAMES.includes(unique.toLowerCase()); i++) unique = `${wanted} ${i}`;
     const a = {
       id: crypto.randomBytes(4).toString('hex'), name: unique, roleId: role.id,
       instructions: String(instructions).trim(), model, permissionMode, worktree: !!worktree,
-      sessionId: crypto.randomUUID(), started: false, createdAt: Date.now(),
+      sessionId: session?.id || crypto.randomUUID(), started: !!session, imported: !!session, createdAt: Date.now(),
     };
     this.state.agents.push(a);
     this.runtime.set(a.id, this.#freshRuntime());
     this.save();
+    this.emit('sessions');
     this.startAgent(a.id, { prompt }).catch((err) => this.event('error', a.name, `failed to start: ${err.message}`));
     return this.view(a);
   }
@@ -190,6 +211,8 @@ export class Project extends EventEmitter {
       '--append-system-prompt', buildPrompt({ agent: a, project: this.name, vaultPath: this.vault.root }),
       '--mcp-config', mcpFile, '--settings', settingsFile, '--add-dir', this.vault.root, '-n', a.name,
       ...(resumed ? ['--resume', a.sessionId] : ['--session-id', a.sessionId]),
+      // A session that began outside UltraClaude recorded its system prompt back then; without this the team protocol would not reach it.
+      ...(a.imported ? ['--system-prompt-snapshot', 'off'] : []),
       ...(a.model ? ['--model', a.model] : []),
       ...(a.permissionMode ? ['--permission-mode', a.permissionMode] : []),
       ...(a.worktree ? ['--worktree', `uc-${a.id}`] : []),
@@ -201,7 +224,7 @@ export class Project extends EventEmitter {
     let argv = args;
     if (/\.(cmd|bat)$/i.test(file)) { argv = ['/c', file, ...args]; file = 'cmd.exe'; }
 
-    Object.assign(r, { state: 'starting', activity: '', buffer: '', pendingPrompt: prompt, startedAt: Date.now() });
+    Object.assign(r, { state: 'starting', activity: '', buffer: '', pendingPrompt: prompt, startedAt: Date.now(), reported: false, stopping: false });
     try {
       r.pty = pty.spawn(file, argv, { name: 'xterm-256color', cols, rows, cwd: this.dir, env });
     } catch (err) {
@@ -213,14 +236,16 @@ export class Project extends EventEmitter {
       this.emit('pty', a.id, d);
     });
     r.pty.onExit(() => {
-      const quick = Date.now() - r.startedAt < 8000;
+      // Claude Code quits at once when it cannot find the session it was asked to resume.
+      const resumeFailed = resumed && !r.reported && !r.stopping && Date.now() - r.startedAt < 5000;
       r.pty = null;
       Object.assign(r, { state: 'stopped', activity: '' });
-      if (resumed && quick) {
-        // The saved session could not be resumed; the next start gets a new one.
+      if (resumeFailed) {
         a.started = false;
+        a.imported = false;
         a.sessionId = crypto.randomUUID();
         this.save();
+        this.event('error', a.name, 'could not continue its earlier session. The next start begins a new one.');
       }
       if (this.agent(a.id)) { this.event('stop', a.name, 'stopped'); this.#changed(a); }
     });
@@ -240,7 +265,7 @@ export class Project extends EventEmitter {
 
   stopAgent(id) {
     const r = this.runtime.get(id);
-    if (r?.pty) { try { r.pty.kill(); } catch { /* already gone */ } }
+    if (r?.pty) { r.stopping = true; try { r.pty.kill(); } catch { /* already gone */ } }
   }
 
   removeAgent(id) {
@@ -254,6 +279,7 @@ export class Project extends EventEmitter {
     try { this.vault.removeAgentNote(a.name); } catch { /* vault unavailable */ }
     this.event('stop', a.name, 'was removed');
     this.emit('agents', this.views());
+    this.emit('sessions');
   }
 
   stopAll() { for (const a of this.state.agents) this.stopAgent(a.id); }
@@ -386,9 +412,13 @@ export class Project extends EventEmitter {
 
   briefing(id) {
     const open = this.state.tasks.filter((t) => t.status !== 'done');
-    const notes = this.vault.list(['Memory', 'Global']).slice(0, 30);
+    this.syncClaudeCode();
+    const notes = this.vault.list(KNOWLEDGE).slice(0, 30);
+    const a = this.agent(id);
     return [
       '[UltraClaude briefing]',
+      // an imported session never saw the team protocol in its system prompt, so it gets it here
+      a?.imported ? buildPrompt({ agent: a, project: this.name, vaultPath: this.vault.root }) : '',
       this.teamSnapshot(id),
       open.length ? `Open tasks:\n${open.map((t) => `- #${t.id} ${t.title} [${t.status}${t.assignee ? `, ${t.assignee}` : ''}]`).join('\n')}` : 'No open tasks on the board.',
       notes.length ? `Shared memory notes (use memory_read / memory_search):\n${notes.map((n) => `- ${n.title}${n.tags.length ? ` (${n.tags.join(', ')})` : ''}: ${short(n.excerpt, 90)}`).join('\n')}` : 'Shared memory is still empty.',
@@ -409,7 +439,7 @@ export class Project extends EventEmitter {
     r.lastActive = Date.now();
 
     if (ev === 'SessionStart') {
-      Object.assign(r, { state: 'idle', activity: '' });
+      Object.assign(r, { state: 'idle', activity: '', reported: true });
       out = context(this.briefing(id));
       if (r.pendingPrompt) {
         const prompt = r.pendingPrompt;
