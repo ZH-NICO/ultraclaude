@@ -120,7 +120,20 @@ test('the map lists every folder Claude Code worked in, and only those can be op
   assert.equal(projects.filter((p) => p.current).length, 1);
   assert.ok(!('cwd' in mine.sessions[0]));
 
-  const refused = await call('POST', '/api/open-project', { dir: os.tmpdir() });
-  assert.equal(refused.status, 400, 'a folder Claude Code never worked in cannot be opened');
+  const refused = await call('POST', '/api/open-project', { dir: path.join(os.tmpdir(), 'uc-does-not-exist-4711') });
+  assert.equal(refused.status, 400, 'a folder that does not exist cannot be opened');
   assert.equal((await refused.json()).error, 'That folder does not exist any more.');
+});
+
+test('the map can list the subfolders of any folder', async (t) => {
+  const dir = tmp('dirs');
+  for (const d of ['src', 'docs', '.git', '$Recycle.Bin', 'node_modules', 'Lib 10', 'Lib 9']) fs.mkdirSync(path.join(dir, d));
+  fs.writeFileSync(path.join(dir, 'readme.md'), 'x');
+  const app = await startServer({ dir: tmp('host'), vaultPath: tmp('v3') });
+  t.after(() => app.close());
+  const get = (p) => fetch(`http://127.0.0.1:${app.port}/api/dirs?path=${encodeURIComponent(p)}`, { headers: { 'x-uc-token': app.token } });
+  assert.deepEqual((await (await get(dir)).json()).dirs, ['docs', 'Lib 9', 'Lib 10', 'src'], 'folders only, hidden ones left out, natural order');
+  assert.equal((await get(path.join(dir, 'nope'))).status, 404);
+  assert.equal((await get('relative/path')).status, 404);
+  assert.equal((await fetch(`http://127.0.0.1:${app.port}/api/dirs?path=${encodeURIComponent(dir)}`)).status, 403, 'needs the token');
 });

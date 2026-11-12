@@ -74,80 +74,271 @@ function setView(view) {
 }
 
 // ---------- map of all chats ----------
+// The drive in the middle, every folder on the way to a Claude Code chat on the rings around it
+// (with all its sibling folders), and every chat as a dot in the folder it was opened in. Any
+// folder can be opened to show its subfolders. Wheel zooms, dragging moves, Fit shows everything.
 
 let chatData = null;
-let chatPick = null; // { key, id } of the chat shown on the right
+let chatPick = null; // { key, id } for a chat, { folder } for a folder
+let mapRoot = null;
+let mapView = null; // { x, y, k }: pan and zoom
+let mapRadius = 0;
+let mapDragged = false;
+const RING = 150; // distance between two folder levels
+const FEW = 12; // a folder with many other subfolders shows this many, then "+N more"
+
+const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
+const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const keyOf = (name, sep) => (sep === '\\' ? name.toLowerCase() : name);
+const samePath = (a, b) => !!a && !!b && a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase();
+const folderNode = (name, p, sep) => ({ type: 'dir', name, path: p, sep, kids: new Map(), chats: [], onPath: false, open: false, loaded: false, showAll: false });
+
+function childFolder(parent, name) {
+  const k = keyOf(name, parent.sep);
+  if (!parent.kids.has(k)) {
+    const p = parent.path.endsWith(parent.sep) ? parent.path + name : parent.path + parent.sep + name;
+    parent.kids.set(k, folderNode(name, p, parent.sep));
+  }
+  return parent.kids.get(k);
+}
+
+function buildFolderTree(projects) {
+  const roots = new Map();
+  for (const pr of projects) {
+    if (!pr.dir) continue;
+    const sep = pr.dir.includes('\\') ? '\\' : '/';
+    const parts = pr.dir.split(/[\\/]+/);
+    const rootName = sep === '\\' ? `${parts[0]}\\` : '/';
+    if (!roots.has(rootName.toLowerCase())) roots.set(rootName.toLowerCase(), folderNode(rootName, rootName, sep));
+    let n = roots.get(rootName.toLowerCase());
+    n.onPath = n.open = true;
+    for (const part of parts.slice(1).filter(Boolean)) { n = childFolder(n, part); n.onPath = n.open = true; }
+    for (const s of pr.sessions) n.chats.push({ type: 'chat', s, pr });
+  }
+  if (roots.size === 1) return [...roots.values()][0];
+  const top = Object.assign(folderNode('This computer', '', '\\'), { onPath: true, open: true, loaded: true, virtual: true });
+  for (const [k, r] of roots) top.kids.set(k, r);
+  return top;
+}
+
+async function loadDirs(n) {
+  if (n.loaded || n.virtual) return;
+  n.loaded = true;
+  try {
+    const { dirs, unreadable } = await api('GET', `/api/dirs?path=${encodeURIComponent(n.path)}`);
+    for (const d of dirs) childFolder(n, d);
+    n.unreadable = !!unreadable;
+  } catch { n.unreadable = true; }
+}
+
+function findFolder(n, p) {
+  if (!n) return null;
+  if (n.path === p) return n;
+  for (const c of n.kids.values()) { const hit = findFolder(c, p); if (hit) return hit; }
+  return null;
+}
+const chatsBelow = (n) => n.chats.length + [...n.kids.values()].reduce((sum, c) => sum + chatsBelow(c), 0);
 
 const loadChats = guard(async () => {
   try {
     chatData = (await api('GET', '/api/chats')).projects;
   } catch {
     setText($('mapSummary'), '');
-    $('mapAxis').replaceChildren();
+    $('mapSvg').replaceChildren();
     $('mapDetail').replaceChildren();
-    $('mapRows').replaceChildren(h('p', { class: 'none' }, 'The UltraClaude server behind this window is older than the window and cannot list chats yet. Run “ultraclaude” in this folder to update it.'));
+    $('mapEmpty').hidden = false;
+    setText($('mapEmpty'), 'The UltraClaude server behind this window is older than the window and cannot list chats yet. Run “ultraclaude” in this folder to update it.');
     return;
   }
-  if (!chatPick && chatData[0]) chatPick = { key: chatData[0].key, id: chatData[0].sessions[0].id };
+  const openBefore = new Set();
+  const remember = (n) => { if (n.open) openBefore.add(n.path); n.kids.forEach(remember); };
+  if (mapRoot) remember(mapRoot);
+  mapRoot = buildFolderTree(chatData);
+  // every folder on the way to a chat shows all of its subfolders
+  const onPath = [];
+  const collect = (n) => { if (n.onPath) onPath.push(n); n.kids.forEach(collect); };
+  collect(mapRoot);
+  await Promise.all(onPath.map(loadDirs));
+  for (const p of openBefore) { const n = findFolder(mapRoot, p); if (n && !n.onPath) { n.open = true; await loadDirs(n); } }
+  if (!chatPick) {
+    const newest = chatData.flatMap((pr) => pr.sessions.map((s) => ({ pr, s }))).sort((a, b) => b.s.updated - a.s.updated)[0];
+    if (newest) chatPick = { key: newest.pr.key, id: newest.s.id };
+  }
+  mapView = null;
   renderMap();
 });
 
-const daysAgo = (ts) => Math.max(0, (Date.now() - ts) / 864e5);
-const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
-const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** What a node shows on the ring outside it: subfolders (when open) and its chats. */
+function mapKids(n) {
+  if (n.type !== 'dir') return [];
+  let folders = [];
+  let more = null;
+  if (n.open) {
+    const all = [...n.kids.values()];
+    const others = all.filter((f) => !f.onPath);
+    const shown = n.showAll || others.length <= FEW + 4 ? others : others.slice(0, FEW);
+    folders = [...all.filter((f) => f.onPath), ...shown].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (shown.length < others.length) more = { type: 'more', parent: n, count: others.length - shown.length, path: `${n.path}\0more` };
+  }
+  return [...folders, ...(more ? [more] : []), ...n.chats];
+}
 
 function renderMap() {
-  if (!chatData) return;
+  if (!chatData || !mapRoot) return;
   const all = chatData.flatMap((pr) => pr.sessions);
   setText($('mapSummary'), `${plural(all.length, 'chat')} in ${plural(chatData.length, 'folder')}`);
-  if (!all.length) {
-    $('mapAxis').replaceChildren();
-    $('mapRows').replaceChildren(h('p', { class: 'none' }, 'No Claude Code chats on this computer yet.'));
-    return renderChatDetail();
-  }
-  // Recent days get most of the width, older months are compressed: now on the right.
-  const span = Math.log1p(Math.max(7, ...all.map((s) => daysAgo(s.updated))));
-  const x = (days) => 100 - (Math.log1p(days) / span) * 100;
-  const ticks = [[0, 'now'], [1, '1 day'], [7, '1 week'], [30, '1 month'], [91, '3 months'], [365, '1 year'], [730, '2 years']].filter(([d]) => Math.log1p(d) <= span);
-  $('mapAxis').replaceChildren(h('span'), h('div', { class: 'track' }, ticks.map(([d, label]) => h('span', { class: 'tick', style: `left:${x(d)}%` }, label))));
-  const biggest = Math.max(...all.map((s) => s.size));
+  $('mapEmpty').hidden = all.length > 0;
+  if (!all.length) { setText($('mapEmpty'), 'No Claude Code chats on this computer yet.'); $('mapSvg').replaceChildren(); return renderChatDetail(); }
+
+  // radial layout: each node gets a slice of the circle in proportion to what hangs below it
+  const weigh = (n) => { n._kids = mapKids(n); n._w = n._kids.length ? n._kids.reduce((s, c) => s + weigh(c), 0) : 1; return n._w; };
+  weigh(mapRoot);
+  mapRadius = 0;
+  const place = (n, a0, a1, depth) => {
+    n._a = (a0 + a1) / 2;
+    n._r = depth * RING;
+    mapRadius = Math.max(mapRadius, n._r);
+    let a = a0;
+    for (const c of n._kids) { const span = ((a1 - a0) * c._w) / n._w; place(c, a, a + span, depth + 1); a += span; }
+  };
+  place(mapRoot, -Math.PI / 2, Math.PI * 1.5, 0);
+
   const q = $('mapFilter').value.trim().toLowerCase();
-  $('mapRows').replaceChildren(...chatData.map((pr) => h('div', { class: `map-row${pr.current ? ' current' : ''}` },
-    h('div', { class: 'lbl', title: pr.dir || pr.name }, h('b', {}, pr.name), h('span', {}, `${pr.current ? 'this folder · ' : ''}${plural(pr.sessions.length, 'chat')}`)),
-    h('div', { class: 'track' }, ticks.map(([d]) => h('i', { class: 'gl', style: `left:${x(d)}%` })), [...pr.sessions].reverse().map((s) => {
-      const size = Math.round(7 + 9 * Math.sqrt(s.size / biggest)); // 7–16 px, area follows the length of the chat
-      const hit = !q || `${s.title} ${s.firstPrompt} ${pr.name}`.toLowerCase().includes(q);
-      const sel = chatPick?.key === pr.key && chatPick.id === s.id;
-      return h('button', {
-        type: 'button', class: `chat${hit ? '' : ' dim'}${sel ? ' sel' : ''}`,
-        style: `left:${x(daysAgo(s.updated))}%;width:${size}px;height:${size}px`,
-        title: `${s.title}\n${pr.name} · ${stamp(s.updated)}`, 'aria-label': `${s.title}, ${pr.name}`,
-        onclick: () => { chatPick = { key: pr.key, id: s.id }; renderMap(); },
-      });
-    })))));
+  const hit = (c) => !q || `${c.s.title} ${c.s.firstPrompt} ${c.pr.name}`.toLowerCase().includes(q);
+  const hitsBelow = (n) => n.chats.some(hit) || [...n.kids.values()].some(hitsBelow);
+  const biggest = Math.max(...all.map((s) => s.size));
+  const pt = (a, r) => `${(r * Math.cos(a)).toFixed(1)},${(r * Math.sin(a)).toFixed(1)}`;
+  const links = [];
+  const nodes = [];
+  const walk = (n) => {
+    for (const c of n._kids) {
+      const mid = (n._r + c._r) / 2;
+      const strong = c.type === 'chat' || c.onPath;
+      links.push(svg('path', { class: `ml${strong ? ' strong' : ''}`, d: `M${pt(n._a, n._r)}C${pt(n._a, mid)} ${pt(c._a, mid)} ${pt(c._a, c._r)}` }));
+      nodes.push(c);
+      walk(c);
+    }
+  };
+  walk(mapRoot);
+
+  const label = (n, text, extra) => {
+    const deg = (n._a * 180) / Math.PI;
+    const flip = Math.cos(n._a) < 0;
+    // the gap to the dot is in em, so it grows with the text when labels keep their size while zoomed out
+    return svg('text', { dx: flip ? '-0.95em' : '0.95em', 'dominant-baseline': 'central', 'text-anchor': flip ? 'end' : 'start', transform: `rotate(${(flip ? deg + 180 : deg).toFixed(1)})` }, text, extra);
+  };
+  const nodeEl = (n) => {
+    const at = `translate(${pt(n._a, n._r)})`;
+    let g;
+    if (n.type === 'chat') {
+      const r = 3.5 + 4.5 * Math.sqrt(n.s.size / biggest);
+      const sel = chatPick?.key === n.pr.key && chatPick?.id === n.s.id;
+      g = svg('g', { class: `mnode chat${n.pr.current ? ' here' : ''}${hit(n) ? '' : ' dim'}`, transform: at, tabindex: 0, role: 'button', 'aria-label': `${n.s.title}, ${n.pr.name}` },
+        svg('title', {}, `${n.s.title}\n${n.pr.dir || n.pr.name} · ${stamp(n.s.updated)}`),
+        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: r.toFixed(1) }), sel ? svg('circle', { class: 'ring', r: (r + 4).toFixed(1) }) : null,
+        label(n, cut(n.s.title, 36)));
+      g.addEventListener('click', () => { if (mapDragged) return; chatPick = { key: n.pr.key, id: n.s.id }; renderMap(); });
+    } else if (n.type === 'more') {
+      g = svg('g', { class: 'mnode more', transform: at, tabindex: 0, role: 'button' },
+        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: 4 }), label(n, `+${n.count} more folders`));
+      g.addEventListener('click', () => { if (mapDragged) return; n.parent.showAll = true; renderMap(); });
+    } else {
+      const below = chatsBelow(n);
+      const current = samePath(n.path, S.project?.dir);
+      const sel = chatPick?.folder === n.path;
+      g = svg('g', { class: `mnode dir${n.onPath ? ' path' : ''}${n.open ? ' open' : ''}${current ? ' current' : ''}${q && !hitsBelow(n) ? ' dim' : ''}`, transform: at, tabindex: 0, role: 'button', 'aria-label': n.path, 'aria-expanded': String(n.open) },
+        svg('title', {}, n.path),
+        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: n.onPath ? 5 : 4 }), sel ? svg('circle', { class: 'ring', r: 9 }) : null,
+        label(n, n.name, below ? svg('tspan', { class: 'cnt', dx: 6 }, current ? `${below} · this folder` : String(below)) : (current ? svg('tspan', { class: 'cnt', dx: 6 }, 'this folder') : null)));
+      g.addEventListener('click', guard(async () => {
+        if (mapDragged) return;
+        const wasPicked = chatPick?.folder === n.path;
+        chatPick = { folder: n.path };
+        if (!n.open) { n.open = true; await loadDirs(n); } else if (wasPicked) n.open = false;
+        renderMap();
+      }));
+    }
+    g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); g.dispatchEvent(new MouseEvent('click', { bubbles: true })); } });
+    return g;
+  };
+
+  const center = svg('g', { class: 'map-center', tabindex: 0, role: 'button', 'aria-label': mapRoot.virtual ? 'This computer' : mapRoot.path },
+    svg('rect', { x: -58, y: -26, width: 116, height: 52, rx: 4 }),
+    svg('text', { y: -3 }, mapRoot.virtual ? 'This computer' : mapRoot.name),
+    svg('text', { class: 'count', y: 15 }, plural(all.length, 'chat')));
+  center.addEventListener('click', () => { if (mapDragged) return; chatPick = { folder: mapRoot.path }; renderMap(); });
+
+  const world = svg('g', { id: 'mapWorld' }, links, nodes.map(nodeEl), center);
+  $('mapSvg').replaceChildren(world);
+  applyView();
   renderChatDetail();
 }
 
+function applyView() {
+  const stage = $('mapStage');
+  if (!stage || !$('mapWorld')) return; // gone after Quit
+  const w = stage.clientWidth;
+  const ht = stage.clientHeight;
+  if (!w || !ht) return;
+  if (!mapView) {
+    const reach = mapRadius + 230; // room for the outermost labels
+    mapView = { x: w / 2, y: ht / 2, k: Math.min(1, Math.min(w, ht) / (2 * reach)) };
+  }
+  const world = $('mapWorld');
+  world.setAttribute('transform', `translate(${mapView.x.toFixed(1)},${mapView.y.toFixed(1)}) scale(${mapView.k.toFixed(4)})`);
+  // Zoomed out, the centre, the dots and the names of the folders that lead to chats keep their size
+  // on screen, so the whole map stays readable; everything else is labelled once you zoom in.
+  const far = mapView.k < 0.6;
+  $('mapSvg').classList.toggle('far', far);
+  world.style.setProperty('--inv', far ? String(0.6 / mapView.k) : '1');
+  world.style.setProperty('--dot', far ? String(Math.min(2.2, 0.6 / mapView.k)) : '1');
+}
+
+function zoomAt(x, y, factor) {
+  if (!mapView) return;
+  const k = Math.min(4, Math.max(0.05, mapView.k * factor));
+  mapView.x = x - ((x - mapView.x) * k) / mapView.k;
+  mapView.y = y - ((y - mapView.y) * k) / mapView.k;
+  mapView.k = k;
+  applyView();
+}
+
 function renderChatDetail() {
+  if (chatPick && 'folder' in chatPick) return renderFolderDetail(findFolder(mapRoot, chatPick.folder));
   const pr = chatData?.find((p) => p.key === chatPick?.key);
   const s = pr?.sessions.find((x) => x.id === chatPick.id);
-  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat.'));
+  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat or folder.'));
   const agent = S.agents.find((a) => a.sessionId === s.id);
   let action = null;
   if (pr.current && agent) action = h('button', { type: 'button', class: 'btn primary', onclick: () => openAgent(agent.id) }, 'Open its terminal');
   else if (pr.current) action = h('button', { type: 'button', class: 'btn primary', onclick: () => createAgent({ sessionId: s.id }) }, 'Continue here');
-  else if (pr.dir) {
-    action = h('button', { type: 'button', class: 'btn primary', onclick: guard(async () => {
-      await api('POST', '/api/open-project', { dir: pr.dir });
-      toast(`Opening ${pr.name} in a new UltraClaude window`);
-    }) }, 'Open folder in UltraClaude');
-  }
+  else if (pr.dir) action = openFolderButton(pr.dir, pr.name);
   $('mapDetail').replaceChildren(...[
     h('h2', {}, s.title),
     h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, stamp(s.updated)), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
     s.firstPrompt && s.firstPrompt !== s.title ? h('div', {}, h('h3', {}, 'Began with'), h('p', { class: 'quote' }, s.firstPrompt)) : null,
     action,
     pr.current ? null : h('p', { class: 'none' }, 'Chats from other folders continue in that folder’s own UltraClaude window.'),
+  ].filter(Boolean));
+}
+
+function openFolderButton(dir, name) {
+  return h('button', { type: 'button', class: 'btn primary', onclick: guard(async () => {
+    await api('POST', '/api/open-project', { dir });
+    toast(`Opening ${name} in a new UltraClaude window`);
+  }) }, 'Open folder in UltraClaude');
+}
+
+function renderFolderDetail(n) {
+  if (!n) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat or folder.'));
+  const below = chatsBelow(n);
+  const here = samePath(n.path, S.project?.dir);
+  $('mapDetail').replaceChildren(...[
+    h('h2', {}, n.virtual ? 'This computer' : n.name),
+    n.virtual ? null : h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, n.path), h('dt', {}, 'Chats'), h('dd', {}, below ? `${below} in here and below` : 'none'), h('dt', {}, 'Subfolders'), h('dd', {}, n.loaded ? String(n.kids.size) : 'not opened yet')),
+    n.chats.length ? h('div', {}, h('h3', {}, 'Chats in this folder'), h('ul', { class: 'map-list' }, n.chats.map((c) => h('li', {}, h('a', { onclick: () => { chatPick = { key: c.pr.key, id: c.s.id }; renderMap(); } }, c.s.title))))) : null,
+    n.unreadable ? h('p', { class: 'none' }, 'Windows does not allow reading this folder.') : null,
+    n.virtual ? null : here ? h('p', { class: 'none' }, 'This window already belongs to this folder.') : openFolderButton(n.path, n.name),
   ].filter(Boolean));
 }
 
@@ -946,6 +1137,43 @@ $('updateBtn').addEventListener('click', guard(async () => {
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
 }));
 $('mapFilter').addEventListener('input', renderMap);
+{
+  // map: the wheel zooms around the pointer, dragging moves the map (a drag never counts as a click)
+  const stage = $('mapStage');
+  let drag = null;
+  stage.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const r = stage.getBoundingClientRect();
+    zoomAt(ev.clientX - r.left, ev.clientY - r.top, Math.exp(-ev.deltaY * 0.0015));
+  }, { passive: false });
+  stage.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 || !mapView || ev.target.closest('.map-zoom')) return;
+    drag = { x: ev.clientX, y: ev.clientY, vx: mapView.x, vy: mapView.y };
+    mapDragged = false;
+  });
+  window.addEventListener('pointermove', (ev) => {
+    if (!drag) return;
+    const dx = ev.clientX - drag.x;
+    const dy = ev.clientY - drag.y;
+    if (!mapDragged && Math.hypot(dx, dy) < 4) return;
+    mapDragged = true;
+    stage.classList.add('dragging');
+    mapView.x = drag.vx + dx;
+    mapView.y = drag.vy + dy;
+    applyView();
+  });
+  window.addEventListener('pointerup', () => {
+    if (!drag) return;
+    drag = null;
+    stage.classList.remove('dragging');
+    setTimeout(() => { mapDragged = false; }, 0);
+  });
+  const middle = () => [stage.clientWidth / 2, stage.clientHeight / 2];
+  $('mapZoomIn').addEventListener('click', () => zoomAt(...middle(), 1.4));
+  $('mapZoomOut').addEventListener('click', () => zoomAt(...middle(), 1 / 1.4));
+  $('mapFit').addEventListener('click', () => { mapView = null; applyView(); });
+  new ResizeObserver(() => { if (S.view === 'map') applyView(); }).observe(stage);
+}
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder

@@ -96,9 +96,15 @@
         <input id="mapFilter" class="head-filter" placeholder="Find a chat" autocomplete="off" aria-label="Find a chat">
       </header>
       <div class="chatmap">
-        <div class="map-scroll">
-          <div class="map-axis" id="mapAxis"></div>
-          <div id="mapRows"></div>
+        <div class="map-stage" id="mapStage">
+          <svg id="mapSvg" role="img" aria-label="Every folder with Claude Code chats, from the drive outwards"></svg>
+          <div class="map-zoom">
+            <button type="button" class="btn" id="mapZoomIn" aria-label="Zoom in">+</button>
+            <button type="button" class="btn" id="mapZoomOut" aria-label="Zoom out">−</button>
+            <button type="button" class="btn" id="mapFit">Fit</button>
+          </div>
+          <p class="map-hint">Scroll to zoom · drag to move · click a folder to open or close it</p>
+          <p class="map-empty" id="mapEmpty" hidden></p>
         </div>
         <aside class="map-detail" id="mapDetail"></aside>
       </div>

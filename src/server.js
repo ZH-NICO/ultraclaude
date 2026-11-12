@@ -173,11 +173,21 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       }));
       return send(res, 200, { projects });
     }
+    if (route === 'GET /api/dirs') {
+      // the subfolders of one folder, for the map; hidden and system folders and dependency folders are left out
+      const dir = String(url.searchParams.get('path') || '');
+      if (!path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 404, { error: 'That folder does not exist.' });
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return send(res, 200, { dirs: [], unreadable: true }); }
+      const skip = /^[.$]|^(System Volume Information|node_modules|__pycache__)$/i;
+      const dirs = entries.filter((e) => e.isDirectory() && !skip.test(e.name)).map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 500);
+      return send(res, 200, { dirs });
+    }
     if (route === 'POST /api/open-project') {
-      // only folders Claude Code itself has worked in can be opened from here
-      const known = listAllProjects().map((pr) => pr.dir).filter(Boolean);
-      const dir = known.find((d) => path.resolve(d).toLowerCase() === path.resolve(String(body.dir || '')).toLowerCase());
-      if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 400, { error: 'That folder does not exist any more.' });
+      // starts (or shows) UltraClaude for another folder, in its own window
+      const dir = String(body.dir || '');
+      if (!path.isAbsolute(dir) || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 400, { error: 'That folder does not exist any more.' });
       spawn(process.execPath, [path.join(ROOT, 'bin', 'ultraclaude.js')], { cwd: dir, detached: true, stdio: 'ignore', windowsHide: true }).unref();
       return send(res, 200, { ok: true });
     }
