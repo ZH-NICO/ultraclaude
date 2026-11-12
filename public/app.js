@@ -5,7 +5,7 @@ const VIEWS = ['overview', 'agents', 'tasks', 'memory'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, sessions: [], allSessions: false, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
+const S = { project: null, roles: [], agents: [], tasks: [], notes: [], noteCount: 0, sessions: [], allSessions: false, picked: new Set(), hidden: new Set(), only: null, view: 'overview', sel: null, want: null, grid: false, note: null, role: 'bugfixer' };
 let ws;
 let halted = false;
 
@@ -87,14 +87,16 @@ function syncSide() {
   for (const b of $('nav').children) b.classList.toggle('active', b.dataset.view === S.view);
   setText($('navTasks'), String(S.tasks.filter((t) => t.status !== 'done').length || ''));
   setText($('navNotes'), String(S.noteCount || ''));
-  for (const [id, r] of rows) if (!agentBy(id)) { r.el.remove(); rows.delete(id); }
+  for (const [id, r] of rows) if (!agentBy(id)) { r.wrap.remove(); rows.delete(id); }
   for (const a of S.agents) {
     let r = rows.get(a.id);
     if (!r) {
       r = { dot: h('i'), nm: h('span', { class: 'nm' }), st: h('span', { class: 'st' }), act: h('span', { class: 'act' }) };
       r.el = h('button', { type: 'button', onclick: () => openAgent(a.id) }, r.dot, r.nm, r.st, r.act);
+      r.pick = h('input', { type: 'checkbox', class: 'pick', 'aria-label': `Select ${a.name}`, onchange: (ev) => togglePick(a.id, ev.target.checked) });
+      r.wrap = h('div', { class: 'arow' }, r.pick, r.el);
       rows.set(a.id, r);
-      $('roster').append(r.el);
+      $('roster').append(r.wrap);
     }
     setAttr(r.el, 'class', `agent ${a.state}${S.view === 'agents' && !S.grid && S.sel === a.id ? ' active' : ''}`);
     setAttr(r.el, 'title', [a.roleName !== a.name ? a.roleName : '', busy(a) ? a.statusText : '', a.activity].filter(Boolean).join(' · ') || a.name);
@@ -106,6 +108,64 @@ function syncSide() {
   $('rosterEmpty').hidden = S.agents.length > 0;
   $('gridBtn').hidden = S.agents.length < 2;
   $('gridBtn').classList.toggle('active', S.view === 'agents' && S.grid);
+  syncSelBar();
+}
+
+// ---------- choosing agents ----------
+
+/** Whether an agent's terminal is part of the "All terminals" view right now. */
+const inGrid = (a) => (S.only ? S.only.has(a.id) : !S.hidden.has(a.id));
+const pickedAgents = () => S.agents.filter((a) => S.picked.has(a.id));
+
+function syncSelBar() {
+  const n = S.picked.size;
+  $('selBar').hidden = n === 0;
+  $('roster').classList.toggle('picking', n > 0);
+  setText($('selCount'), `${n} selected`);
+  for (const [id, r] of rows) {
+    const on = S.picked.has(id);
+    if (r.pick.checked !== on) r.pick.checked = on;
+    r.wrap.classList.toggle('picked', on);
+  }
+}
+
+function togglePick(id, on) {
+  if (on) S.picked.add(id); else S.picked.delete(id);
+  syncSelBar();
+}
+
+function openTogether() {
+  const list = pickedAgents();
+  if (list.length === 1) return openAgent(list[0].id);
+  S.only = new Set(list.map((a) => a.id));
+  S.grid = true;
+  setView('agents');
+}
+
+const stopPicked = guard(async () => {
+  await Promise.all(pickedAgents().filter((a) => a.state !== 'stopped').map((a) => api('POST', `/api/agents/${a.id}/stop`, {})));
+});
+
+const removePicked = guard(async () => {
+  const list = pickedAgents();
+  if (!list.length) return;
+  const what = list.length === 1 ? `agent “${list[0].name}”` : `${list.length} agents`;
+  if (!confirm(`Remove ${what}? Their sessions will be ended.`)) return;
+  S.picked.clear();
+  await Promise.all(list.map((a) => api('DELETE', `/api/agents/${a.id}`)));
+});
+
+/** The "−" button in All terminals: takes one terminal out of that view without stopping the agent. */
+function hideFromGrid(id) {
+  if (S.only) S.only.delete(id); else S.hidden.add(id);
+  layoutTerms();
+}
+
+function syncGridBar() {
+  const shown = S.agents.filter(inGrid).length;
+  const partial = S.view === 'agents' && S.grid && shown < S.agents.length;
+  $('gridBar').hidden = !partial;
+  if (partial) setText($('gridBarText'), shown ? `Showing ${shown} of ${S.agents.length} terminals` : 'All terminals are hidden');
 }
 
 /** Earlier Claude Code sessions of this folder; a click continues one as an agent. */
@@ -305,11 +365,31 @@ function ensureTerm(a) {
   }) }, 'Remove');
   t.off = h('div', { class: 'pane-off' }, 'Stopped. Start it to continue its session.');
   t.body = h('div', { class: 'pane-body' }, t.off);
-  t.pane = h('div', { class: 'pane' }, h('div', { class: 'pane-head' }, t.dot, t.nm, t.meta, t.toggle, remove), t.body);
+  t.hide = h('button', { type: 'button', class: 'link hide', title: 'Hide from All terminals', 'aria-label': 'Hide from All terminals', onclick: () => hideFromGrid(a.id) }, '−');
+  t.pane = h('div', { class: 'pane' }, h('div', { class: 'pane-head' }, t.dot, t.nm, t.meta, t.toggle, t.hide, remove), t.body);
+  t.body.addEventListener('paste', (ev) => pasteImage(ev, a.id), true); // Ctrl+V with an image on the clipboard
   new ResizeObserver(() => fitTerm(t)).observe(t.body);
   $('terms').append(t.pane);
   terms.set(a.id, t);
   return t;
+}
+
+/**
+ * Ctrl+V with an image (a screenshot, a copied picture) hands it to the agent right away. The image is
+ * saved by the server and its path typed into the prompt, which Claude Code shows as "[Image #1]".
+ * Text, even next to an image, is pasted as usual.
+ */
+function pasteImage(ev, id) {
+  const data = ev.clipboardData;
+  const item = data && [...data.items].find((i) => i.kind === 'file' && i.type.startsWith('image/'));
+  if (!item || data.types.includes('text/plain')) return;
+  const file = item.getAsFile();
+  if (!file) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  fetch(`/api/agents/${id}/paste-image`, { method: 'POST', headers: { 'x-uc-token': TOKEN, 'content-type': file.type }, body: file })
+    .then(async (res) => { if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText); })
+    .catch((err) => toast(`Could not paste the image: ${err.message}`, 'error'));
 }
 
 // Fits are bundled and only run once the box has settled, so a terminal keeps its size
@@ -324,10 +404,12 @@ function fitTerm(t) {
 
 function layoutTerms() {
   $('terms').classList.toggle('grid', S.grid);
+  syncGridBar();
   for (const a of S.agents) {
     const t = ensureTerm(a);
-    const show = S.grid || S.sel === a.id;
+    const show = S.grid ? inGrid(a) : S.sel === a.id;
     t.pane.hidden = !show;
+    t.hide.hidden = !S.grid;
     if (show && S.view === 'agents') {
       if (!t.opened) { t.term.open(t.body); t.opened = true; }
       requestAnimationFrame(() => fitTerm(t));
@@ -498,6 +580,8 @@ let agentSig = null;
 
 function onAgents(agents) {
   S.agents = agents;
+  const alive = new Set(agents.map((a) => a.id));
+  for (const set of [S.picked, S.hidden, S.only]) if (set) for (const id of set) if (!alive.has(id)) set.delete(id);
   const sig = agents.map((a) => `${a.id}:${a.name}`).join('|');
   if (!agentBy(S.sel)) S.sel = agents[0]?.id || null;
   if (sig !== agentSig) {
@@ -582,7 +666,16 @@ function halt(title, text) {
 
 $('nav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
 $('showTools').addEventListener('change', (ev) => $('feed').classList.toggle('hide-tools', !ev.target.checked));
-$('gridBtn').addEventListener('click', () => { S.grid = !(S.view === 'agents' && S.grid); setView('agents'); });
+$('gridBtn').addEventListener('click', () => {
+  S.grid = !(S.view === 'agents' && S.grid);
+  if (S.grid) S.only = null; // "All terminals" means all, except the ones hidden with "−"
+  setView('agents');
+});
+$('gridShowAll').addEventListener('click', () => { S.only = null; S.hidden.clear(); layoutTerms(); });
+$('selOpen').addEventListener('click', openTogether);
+$('selStop').addEventListener('click', stopPicked);
+$('selRemove').addEventListener('click', removePicked);
+$('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder

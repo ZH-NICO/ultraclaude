@@ -27,6 +27,15 @@
     <div class="side-scroll">
       <h2 class="side-head">Agents</h2>
       <div id="roster"></div>
+      <div class="selbar" id="selBar" hidden>
+        <span id="selCount"></span>
+        <div class="selact">
+          <button type="button" class="btn" id="selOpen" title="Show the selected agents side by side">Open together</button>
+          <button type="button" class="btn" id="selStop" title="Stop the selected agents. Their sessions can be continued later.">Stop</button>
+          <button type="button" class="btn" id="selRemove" title="Remove the selected agents and end their sessions">Remove</button>
+          <button type="button" class="link" id="selClear">Clear</button>
+        </div>
+      </div>
       <p class="side-note" id="rosterEmpty">None yet.</p>
       <div class="side-actions">
         <button type="button" class="btn" id="addAgent">New agent</button>
@@ -77,6 +86,10 @@
     </section>
 
     <section id="view-agents" class="view" hidden>
+      <div class="gridbar" id="gridBar" hidden>
+        <span id="gridBarText"></span>
+        <button type="button" class="link" id="gridShowAll">Show all</button>
+      </div>
       <div id="terms"></div>
     </section>
 

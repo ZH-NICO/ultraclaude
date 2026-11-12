@@ -218,8 +218,13 @@ export class Project extends EventEmitter {
       ...(a.worktree ? ['--worktree', `uc-${a.id}`] : []),
     ];
     const env = { ...process.env, ULTRACLAUDE_HOOK_URL: `http://127.0.0.1:${port}/hook/${token}/${a.id}`, ULTRACLAUDE_AGENT: a.name };
-    // If UltraClaude itself was launched from inside a Claude Code session, don't pass that session's markers on.
-    for (const k of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID']) delete env[k];
+    // If UltraClaude itself was launched from inside a Claude Code session, don't pass that session's
+    // markers on. That includes NO_COLOR, which Claude Code sets for its own tool shells and which would
+    // turn every agent's terminal monochrome.
+    const markers = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID'];
+    if (markers.some((k) => k in env)) delete env.NO_COLOR;
+    for (const k of markers) delete env[k];
+    env.COLORTERM ||= 'truecolor'; // the terminal in the window supports 24-bit colour
 
     let argv = args;
     if (/\.(cmd|bat)$/i.test(file)) { argv = ['/c', file, ...args]; file = 'cmd.exe'; }
@@ -299,6 +304,28 @@ export class Project extends EventEmitter {
     r.pty.write(String(text).replace(/\s*\r?\n\s*/g, ' ').trim());
     setTimeout(() => r.pty?.write('\r'), 500);
     return true;
+  }
+
+  /**
+   * Saves a pasted image in the project's agent data and types its path into the agent's prompt,
+   * which Claude Code turns into an image attachment ("[Image #1]").
+   */
+  pasteImage(id, data, type = '') {
+    const r = this.runtime.get(id);
+    if (!r?.pty) throw new Error('The agent is not running.');
+    const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp' }[String(type).split(';')[0].trim().toLowerCase()];
+    if (!ext) throw new Error('Only PNG, JPEG, GIF, WebP and BMP images can be pasted.');
+    if (!data?.length) throw new Error('The image is empty.');
+    const dir = path.join(this.dataDir, 'pasted');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const f of fs.readdirSync(dir)) { // clean up what is older than a week
+      try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 7 * 864e5) fs.rmSync(path.join(dir, f)); } catch { /* gone already */ }
+    }
+    const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+    const file = path.join(dir, `pasted-${stamp}-${crypto.randomBytes(2).toString('hex')}.${ext}`);
+    fs.writeFileSync(file, data);
+    r.pty.write(`\x1b[200~${file}\x1b[201~ `);
+    return file;
   }
 
   // ---------- messages ----------

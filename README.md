@@ -91,6 +91,13 @@ npm link
 
 Colour only ever means state: green is working, amber needs you. The window follows your system's light or dark theme.
 
+## Working with several agents
+
+- **Select agents.** Tick the box in front of an agent in the sidebar. A bar appears with **Open together** (just those terminals side by side), **Stop** and **Remove** for the whole selection.
+- **Hide a terminal.** In All terminals every pane has a **−** next to Stop. It takes that terminal out of the view and leaves the agent running. A bar on top shows how many are hidden, with **Show all** to bring them back.
+- **Paste images with Ctrl+V.** Copy a screenshot or a picture and press Ctrl+V in an agent's terminal. The image is attached right away as `[Image #1]`, no file path needed. Text still pastes as usual.
+- **Colours like a normal terminal.** Agents run with full colour, also when UltraClaude itself was started from a shell that has `NO_COLOR` set.
+
 ## Roles
 
 | Role | What it does |

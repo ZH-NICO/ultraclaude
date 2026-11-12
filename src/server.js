@@ -46,6 +46,19 @@ function readBody(req, limit = 2_000_000) {
   });
 }
 
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) { reject(new Error('The image is too large.')); req.destroy(); } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 function openExternal(target) {
   const [cmd, args] = process.platform === 'win32' ? ['cmd.exe', ['/c', 'start', '', target]]
     : process.platform === 'darwin' ? ['open', [target]] : ['xdg-open', [target]];
@@ -101,6 +114,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
 
   async function api(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
+    const paste = req.method === 'POST' && /^\/api\/agents\/([^/]+)\/paste-image$/.exec(url.pathname);
+    if (paste) {
+      if (!project.agent(paste[1])) return send(res, 404, { error: 'Agent not found' });
+      const file = project.pasteImage(paste[1], await readRaw(req, 25_000_000), req.headers['content-type']);
+      return send(res, 200, { path: file });
+    }
     const body = ['POST', 'PATCH'].includes(req.method) ? await readBody(req) : {};
     const idMatch = /^\/api\/(agents|tasks)\/([^/]+)(?:\/(start|stop))?$/.exec(url.pathname);
 
