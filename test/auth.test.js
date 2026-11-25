@@ -191,3 +191,50 @@ test('the server: nothing works without signing in, and who may connect is check
   assert.equal(await closed, 4401);
   assert.equal((await call('GET', '/api/state', undefined, { cookie })).status, 401);
 });
+
+test('guest access: a limited session without an account, in memory only, and switchable off', async (t) => {
+  const usersFile = path.join(tmp('acc'), 'users.json');
+  const app = await startServer({ dir: tmp('proj'), vaultPath: tmp('v'), usersFile });
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${app.port}`;
+  const call = (method, url, body, headers = {}) => fetch(base + url, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json', ...headers }, body: body && JSON.stringify(body) });
+
+  assert.equal((await (await call('GET', '/api/auth/me')).json()).guestAllowed, true, 'offered by default');
+  assert.equal((await call('POST', '/api/auth/guest')).status, 200);
+  assert.equal((await fetch(`${base}/api/auth/guest`, { method: 'POST' })).status, 403, 'and still needs the address token');
+  const res = await call('POST', '/api/auth/guest');
+  assert.match(res.headers.get('set-cookie'), /^uc_session=[\w-]{40,}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=43200$/);
+  const guest = { cookie: res.headers.get('set-cookie').split(';')[0] };
+
+  const me = await (await call('GET', '/api/auth/me', undefined, guest)).json();
+  assert.equal(me.user.guest, true);
+  assert.equal(me.user.firstName, 'Guest');
+  assert.equal((await call('GET', '/api/state', undefined, guest)).status, 200, 'the app itself works');
+  assert.equal((await call('GET', '/api/usage', undefined, guest)).status, 200);
+  assert.equal((await call('PATCH', '/api/auth/prefs', { theme: 'dark' }, guest)).status, 200, 'the look of the window can change');
+
+  // nothing that belongs to an account
+  for (const [method, url, body] of [['PATCH', '/api/auth/profile', { firstName: 'X' }], ['POST', '/api/auth/password', { current: 'a', next: 'b' }], ['GET', '/api/auth/sessions'], ['DELETE', '/api/auth/account', { password: 'x' }], ['PATCH', '/api/auth/guest-setting', { allow: false }]]) {
+    const r = await call(method, url, body, guest);
+    assert.equal(r.status, 403, `${method} ${url}`);
+    assert.equal((await r.json()).error, 'Create an account to use this.');
+  }
+  assert.ok(!fs.existsSync(usersFile) || !JSON.stringify(JSON.parse(fs.readFileSync(usersFile, 'utf8'))).includes('guest'), 'no guest session is written to disk');
+
+  // an account can turn the button off; that ends the guests and refuses new ones
+  const up = await call('POST', '/api/auth/signup', ACCOUNT);
+  const owner = { cookie: up.headers.get('set-cookie').split(';')[0] };
+  const ws = await new Promise((resolve) => { const w = new WebSocket(`ws://127.0.0.1:${app.port}/ws?t=${app.token}`, { headers: { ...guest, origin: `http://127.0.0.1:${app.port}` } }); w.on('open', () => resolve(w)); w.on('error', () => resolve(null)); });
+  assert.ok(ws, 'a guest gets the live terminal connection too');
+  const closed = new Promise((resolve) => ws.on('close', (code) => resolve(code)));
+  const off = await (await call('PATCH', '/api/auth/guest-setting', { allow: false }, owner)).json();
+  assert.equal(off.guestAllowed, false);
+  assert.equal(await closed, 4401);
+  assert.equal((await call('GET', '/api/state', undefined, guest)).status, 401, 'the old guest session is over');
+  assert.equal((await call('POST', '/api/auth/guest')).status, 403);
+  assert.equal((await (await call('GET', '/api/auth/me')).json()).guestAllowed, false);
+  assert.equal(new Accounts(usersFile).allowGuest, false, 'the choice survives a restart');
+  assert.equal((await call('GET', '/api/state', undefined, owner)).status, 200, 'the account is not affected');
+  assert.equal((await (await call('PATCH', '/api/auth/guest-setting', { allow: true }, owner)).json()).guestAllowed, true);
+  assert.equal((await call('POST', '/api/auth/guest')).status, 200);
+});

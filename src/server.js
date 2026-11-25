@@ -127,7 +127,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const signedIn = (user) => { const s = accounts.start(user, meta); return { cookie: cookie(s.token, s.maxAge) }; };
     if (route === 'GET /api/auth/me') {
       const who = sessionOf(req);
-      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), version });
+      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), guestAllowed: accounts.allowGuest, version });
+    }
+    if (route === 'POST /api/auth/guest') {
+      accounts.brake('guest');
+      const g = accounts.startGuest(meta);
+      return send(res, 200, { user: accounts.publicUser(accounts.guestUser) }, { 'set-cookie': cookie(g.token, g.maxAge) });
     }
     if (route === 'POST /api/auth/signup') {
       accounts.brake('signup');
@@ -141,6 +146,13 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const who = sessionOf(req);
     if (!who) return send(res, 401, { error: 'Please sign in.' });
     const { user, session } = who;
+    // a guest has no account: only sign out and the look of the window
+    if (user.guest && route !== 'POST /api/auth/logout' && route !== 'PATCH /api/auth/prefs') return send(res, 403, { error: 'Create an account to use this.' });
+    if (route === 'PATCH /api/auth/guest-setting') {
+      accounts.allowGuest = !!body.allow;
+      dropSockets((s) => s.userId === 'guest');
+      return send(res, 200, { guestAllowed: accounts.allowGuest });
+    }
     if (route === 'POST /api/auth/logout') {
       accounts.logout(session);
       dropSockets((s) => s === session);

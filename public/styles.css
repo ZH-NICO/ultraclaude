@@ -506,3 +506,9 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
   .stats > div:nth-child(n+3) { border-top: 1px solid var(--line); }
   .row2 { grid-template-columns: 1fr; }
 }
+
+
+.auth-guest { margin-top: 18px; display: flex; flex-direction: column; gap: 10px; }
+.auth-guest .or { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: 12px; }
+.auth-guest .or::before, .auth-guest .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.who .col b { font-weight: 600; }

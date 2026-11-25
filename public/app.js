@@ -1174,6 +1174,7 @@ function showAuth(mode, notice = '') {
   setText($('authTitle'), t.title); setText($('authSub'), t.sub); setText($('authGo'), t.go);
   setText($('authSwitchText'), t.ask); setText($('authSwitch'), t.to);
   $('nameFields').hidden = mode !== 'signup';
+  $('guestBox').hidden = !S.guestAllowed;
   $('pwHint').hidden = mode !== 'signup';
   $('aPass').autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
   authError(notice);
@@ -1186,7 +1187,9 @@ const fillAvatar = (el, u) => el.replaceChildren(u.avatar ? h('img', { src: u.av
 
 function renderProfile() {
   fillAvatar($('profileAvatar'), S.user);
-  setText($('profileName'), `${S.user.firstName} ${S.user.lastName}`);
+  setText($('profileName'), `${S.user.firstName} ${S.user.lastName}`.trim());
+  setText($('signOut'), S.user.guest ? 'End guest session' : 'Sign out');
+  $('setNav').querySelector('[data-tab=security]').hidden = !!S.user.guest;
   $('profileBtn').title = `${S.user.email} · account and settings`;
   $('profileBtn').hidden = false;
 }
@@ -1207,10 +1210,15 @@ function enterApp(user) {
   connect();
 }
 
+/** Set by the Create an account button of the guest view, so the next page load opens the sign-up form. */
+const wantSignup = () => { try { const v = sessionStorage.getItem('uc-signup'); sessionStorage.removeItem('uc-signup'); return !!v; } catch { return false; } };
+
 async function boot() {
   try {
     const me = await api('GET', '/api/auth/me');
-    if (me.user) enterApp(me.user); else showAuth(me.accounts ? 'login' : 'signup');
+    S.guestAllowed = me.guestAllowed;
+    const signup = wantSignup(); // always read, so an old flag cannot turn up later
+    if (me.user) enterApp(me.user); else showAuth(me.accounts && !signup ? 'login' : 'signup');
   } catch (err) {
     halt('UltraClaude cannot be reached', err.message);
   }
@@ -1243,7 +1251,20 @@ async function squareAvatar(file) {
   return canvas.toDataURL('image/jpeg', 0.86);
 }
 
+function tabGuestProfile() {
+  const make = guard(async () => {
+    try { sessionStorage.setItem('uc-signup', '1'); } catch { /* the sign-in screen is shown instead */ }
+    await api('POST', '/api/auth/logout', {});
+    location.reload();
+  });
+  $('tab-profile').replaceChildren(
+    h('h2', {}, 'Guest'),
+    h('div', { class: 'who' }, h('span', { class: 'avatar big' }, 'G'), h('div', { class: 'col' }, h('b', {}, 'You are using UltraClaude as a guest'), h('span', { class: 'fine' }, 'Without an account there is no photo, no saved settings and no password to change. The guest session ends after 12 hours of not using it.'))),
+    h('div', { class: 'formrow' }, h('button', { type: 'button', class: 'btn primary', onclick: make }, 'Create an account')));
+}
+
 function tabProfile() {
+  if (S.user.guest) return tabGuestProfile();
   const u = S.user;
   const avatar = h('span', { class: 'avatar big' });
   fillAvatar(avatar, u);
@@ -1422,6 +1443,8 @@ async function tabSecurity() {
     try { await api('POST', '/api/auth/password', { current: cur.value, next: next.value }); cur.value = next.value = again.value = ''; toast('Password changed. Your other devices were signed out.'); tabSecurity(); } catch (err) { say(msg, err.message, 'bad'); }
   } }, 'Change password');
 
+  const guestBox = h('input', { type: 'checkbox', checked: !!S.guestAllowed });
+  guestBox.addEventListener('change', guard(async () => { S.guestAllowed = (await api('PATCH', '/api/auth/guest-setting', { allow: guestBox.checked })).guestAllowed; }));
   const sessionsBox = h('div', { class: 'list' }, h('div', {}, 'Loading…'));
   const others = h('button', { type: 'button', class: 'btn', hidden: true, onclick: guard(async () => { await api('POST', '/api/auth/sessions/revoke-others', {}); tabSecurity(); }) }, 'Sign out everywhere else');
 
@@ -1438,6 +1461,7 @@ async function tabSecurity() {
     h('h2', {}, 'Security'),
     h('div', { class: 'group' }, h('h3', {}, 'Password'), h('div', { class: 'row2' }, field('Current password', cur), h('span')), h('div', { class: 'row2' }, field('New password', next), field('Repeat new password', again)), h('div', { class: 'formrow' }, change, msg), h('p', { class: 'fine' }, 'At least 10 characters. Changing it signs you out on every other device.')),
     h('div', { class: 'group' }, h('h3', {}, 'Where you are signed in'), sessionsBox, h('div', { class: 'formrow' }, others)),
+    h('div', { class: 'group' }, h('h3', {}, 'Sign-in screen'), h('label', { class: 'switch' }, guestBox, 'Offer the button Continue without signing in'), h('p', { class: 'fine' }, 'Anyone who can open this window can then use it as a guest, without an account. Turn it off to require a sign-in every time. Guests cannot see or change any account.')),
     h('div', { class: 'group' }, h('h3', {}, 'How your account is protected'), h('p', { class: 'fine' }, 'Passwords are stored only as a salted scrypt hash. After five wrong tries an account is locked for a while. A session lasts 30 days and lives in a cookie that scripts cannot read and other websites cannot use. The window only talks to this computer.')),
     h('div', { class: 'danger-zone group' }, h('h3', {}, 'Delete account'), h('p', { class: 'fine' }, 'Removes this account from this computer. Your projects, agents and memory stay as they are.'), ask, confirmRow));
 
@@ -1464,6 +1488,7 @@ function tabAbout() {
 const TABS = { profile: tabProfile, appearance: tabAppearance, usage: tabUsage, security: tabSecurity, about: tabAbout };
 
 function openSettings(tab = 'profile') {
+  if (S.user.guest && tab === 'security') tab = 'profile';
   const dlg = $('settingsDialog');
   if (!dlg.open) dlg.showModal();
   for (const b of $('setNav').querySelectorAll('button[data-tab]')) { b.classList.toggle('active', b.dataset.tab === tab); b.setAttribute('aria-current', String(b.dataset.tab === tab)); }
@@ -1514,6 +1539,10 @@ $('authForm').addEventListener('submit', async (ev) => {
   } finally {
     $('authGo').disabled = false;
   }
+});
+$('guestGo').addEventListener('click', async () => {
+  $('guestGo').disabled = true;
+  try { enterApp((await api('POST', '/api/auth/guest')).user); } catch (err) { authError(err.message); } finally { $('guestGo').disabled = false; }
 });
 $('profileBtn').addEventListener('click', () => openSettings('profile'));
 $('setNav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-tab]'); if (b) openSettings(b.dataset.tab); });

@@ -134,6 +134,8 @@ The prompt and status line stay at the bottom while you scroll the chat with the
 
 The window asks you to sign in. The first time you create an account with your name, email and a password. After that you sign in with email and password.
 
+Below the form, **Continue without signing in** opens the window as a guest. A guest has no account: no photo, no saved settings and no access to account tools, and the session ends after 12 hours of not using it. Anyone who can open the window can do this, so if you want a real sign-in every time, turn it off under **Settings → Security → Sign-in screen**.
+
 Bottom left in the sidebar is your profile: your photo (or initials) and your name. It opens **Settings**, a window in the middle of the screen:
 
 | Section | What it does |

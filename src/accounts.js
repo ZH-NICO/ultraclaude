@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 const scrypt = promisify(crypto.scrypt);
 const KDF = { N: 16384, r: 8, p: 1, keylen: 64 };
 const SESSION_MS = 30 * 864e5; // a session ends after 30 days without use
+const GUEST_MS = 12 * 3600e3; // a guest session after 12 hours
 const LOCK_AFTER = 5; // failed sign-ins for one email before it is locked
 const THEMES = ['system', 'light', 'dark'];
 const COMMON = ['password', 'passwort', 'qwerty', 'letmein', 'iloveyou', '12345678', 'abcdefgh', 'ultraclaude'];
@@ -82,6 +83,9 @@ export class Accounts {
     try { this.data = { ...this.data, ...JSON.parse(fs.readFileSync(file, 'utf8')) }; } catch { /* first run */ }
     const now = Date.now();
     this.data.sessions = this.data.sessions.filter((s) => now - s.lastSeen < SESSION_MS && this.data.users.some((u) => u.id === s.userId));
+    this.data.settings = { allowGuest: true, ...this.data.settings };
+    this.guests = []; // guest sessions: kept in memory only, gone when the server stops
+    this.guestUser = { id: 'guest', guest: true, firstName: 'Guest', lastName: '', email: '', avatar: '', createdAt: 0, prefs: { theme: 'system', termFont: 13, notify: true, blockLimit: null } };
     this.fails = new Map(); // email -> { count, until }
     this.recent = []; // timestamps of all sign-in attempts, for a global brake
   }
@@ -99,7 +103,25 @@ export class Accounts {
   count() { return this.data.users.length; }
 
   publicUser(u) {
-    return { id: u.id, firstName: u.firstName, lastName: u.lastName, email: u.email, avatar: u.avatar || '', createdAt: u.createdAt, prefs: u.prefs };
+    return { id: u.id, guest: !!u.guest, firstName: u.firstName, lastName: u.lastName, email: u.email, avatar: u.avatar || '', createdAt: u.createdAt, prefs: u.prefs };
+  }
+
+  /** Whether the sign-in screen offers "Continue without signing in". Saved with the accounts. */
+  get allowGuest() { return this.data.settings.allowGuest !== false; }
+
+  set allowGuest(on) {
+    this.data.settings.allowGuest = !!on;
+    if (!on) this.guests = []; // turning it off ends every guest session
+    this.#save();
+  }
+
+  /** A session without an account. It only lasts 12 hours without use and is not written to disk. */
+  startGuest(meta = {}) {
+    if (!this.allowGuest) throw new AuthError('Please sign in.', 403);
+    const token = crypto.randomBytes(32).toString('base64url');
+    const now = Date.now();
+    this.guests.push({ id: crypto.randomBytes(6).toString('hex'), hash: sha(token), userId: 'guest', createdAt: now, lastSeen: now, agent: String(meta.agent || '').slice(0, 200) });
+    return { token, maxAge: GUEST_MS / 1000 };
   }
 
   async signup({ firstName, lastName, email, password }) {
@@ -159,6 +181,12 @@ export class Accounts {
     if (!token || token.length > 100) return null;
     const h = sha(token);
     const now = Date.now();
+    const guest = this.allowGuest && this.guests.find((x) => same(x.hash, h));
+    if (guest) {
+      if (now - guest.lastSeen > GUEST_MS) { this.guests = this.guests.filter((x) => x !== guest); return null; }
+      guest.lastSeen = now;
+      return { user: this.guestUser, session: guest };
+    }
     const s = this.data.sessions.find((x) => same(x.hash, h));
     if (!s || now - s.lastSeen > SESSION_MS) return null;
     const user = this.data.users.find((u) => u.id === s.userId);
@@ -167,7 +195,11 @@ export class Accounts {
     return { user, session: s };
   }
 
-  logout(session) { this.data.sessions = this.data.sessions.filter((s) => s !== session); this.#save(); }
+  logout(session) {
+    this.guests = this.guests.filter((s) => s !== session);
+    this.data.sessions = this.data.sessions.filter((s) => s !== session);
+    this.#save();
+  }
 
   sessionsOf(user, current) {
     return this.data.sessions.filter((s) => s.userId === user.id).sort((a, b) => b.lastSeen - a.lastSeen)
