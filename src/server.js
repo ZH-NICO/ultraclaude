@@ -14,7 +14,18 @@ import { KNOWLEDGE } from './vault.js';
 import { claudeProjectDir, listAllProjects } from './history.js';
 import { codeVersion } from './version.js';
 import { handleMcp } from './mcp.js';
-import { loadConfig } from './config.js';
+import { loadConfig, HOME_DIR } from './config.js';
+import { Accounts, AuthError } from './accounts.js';
+import { usageReport } from './usage.js';
+
+const COOKIE = 'uc_session';
+const RANGES = ['today', '7d', '30d', 'all'];
+// What the browser may load: only this server. Inline styles are needed by the terminal and the graph.
+const SECURITY = {
+  'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin',
+};
+const equal = (a, b) => typeof a === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -81,9 +92,13 @@ function knownToObsidian(dir) {
   }
 }
 
-export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false } = {}) {
+export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false, usersFile = path.join(HOME_DIR, 'users.json') } = {}) {
   const project = new Project({ dir, vaultPath });
-  const token = crypto.randomBytes(18).toString('hex');
+  const accounts = new Accounts(usersFile);
+  const token = crypto.randomBytes(18).toString('hex'); // in the window's address; every API call needs it
+  const cliKey = crypto.randomBytes(18).toString('hex'); // only in server.json, so only the command line can stop or restart the server
+  const sessionOf = (req) => accounts.fromCookie(req.headers.cookie, COOKIE);
+  const cookie = (value, maxAge) => `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
   const version = process.env.ULTRACLAUDE_TEST_VERSION || codeVersion(); // the code this server runs
   const clients = new Set();
   const broadcast = (msg) => {
@@ -99,10 +114,60 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   project.on('pty', (id, d) => broadcast({ t: 'out', id, d }));
   project.on('sessions', () => broadcast({ t: 'sessions', sessions: project.sessions() }));
 
-  const send = (res, status, body) => {
-    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  const send = (res, status, body, headers = {}) => {
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY, ...headers });
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
+  /** Closes the live connections of the sessions that gone picks out (they were signed out). */
+  const dropSockets = (gone) => { for (const ws of clients) if (gone(ws.session)) ws.close(4401, 'signed out'); };
+
+  async function authRoute(req, res, url, route) {
+    const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req);
+    const meta = { agent: req.headers['user-agent'] };
+    const signedIn = (user) => { const s = accounts.start(user, meta); return { cookie: cookie(s.token, s.maxAge) }; };
+    if (route === 'GET /api/auth/me') {
+      const who = sessionOf(req);
+      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), version });
+    }
+    if (route === 'POST /api/auth/signup') {
+      accounts.brake('signup');
+      const user = await accounts.signup(body);
+      return send(res, 200, { user: accounts.publicUser(user) }, { 'set-cookie': signedIn(user).cookie });
+    }
+    if (route === 'POST /api/auth/login') {
+      const { user, token: t, maxAge } = await accounts.login(body.email, body.password, meta);
+      return send(res, 200, { user: accounts.publicUser(user) }, { 'set-cookie': cookie(t, maxAge) });
+    }
+    const who = sessionOf(req);
+    if (!who) return send(res, 401, { error: 'Please sign in.' });
+    const { user, session } = who;
+    if (route === 'POST /api/auth/logout') {
+      accounts.logout(session);
+      dropSockets((s) => s === session);
+      return send(res, 200, { ok: true }, { 'set-cookie': cookie('', 0) });
+    }
+    if (route === 'PATCH /api/auth/profile') return send(res, 200, { user: accounts.publicUser(await accounts.updateProfile(user, body)) });
+    if (route === 'PATCH /api/auth/prefs') return send(res, 200, { user: accounts.publicUser(accounts.setPrefs(user, body)) });
+    if (route === 'POST /api/auth/password') {
+      await accounts.changePassword(user, body.current, body.next, session);
+      dropSockets((s) => s.userId === user.id && s !== session);
+      return send(res, 200, { ok: true });
+    }
+    if (route === 'GET /api/auth/sessions') return send(res, 200, { sessions: accounts.sessionsOf(user, session) });
+    if (route === 'POST /api/auth/sessions/revoke-others') { accounts.revokeOthers(user, session); dropSockets((s) => s.userId === user.id && s !== session); return send(res, 200, { ok: true }); }
+    const one = /^\/api\/auth\/sessions\/([0-9a-f]+)$/.exec(url.pathname);
+    if (req.method === 'DELETE' && one) {
+      accounts.revoke(user, one[1]);
+      dropSockets((s) => s.userId === user.id && s.id === one[1]);
+      return send(res, 200, { ok: true });
+    }
+    if (route === 'DELETE /api/auth/account') {
+      await accounts.deleteAccount(user, body.password);
+      dropSockets((s) => s.userId === user.id);
+      return send(res, 200, { ok: true }, { 'set-cookie': cookie('', 0) });
+    }
+    return send(res, 404, { error: 'Not found' });
+  }
 
   let closing = false;
   const close = async () => {
@@ -117,6 +182,16 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
 
   async function api(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
+    if (url.pathname.startsWith('/api/auth/')) return authRoute(req, res, url, route);
+    // Everything else needs a signed-in account. The command line may only read the state and stop the
+    // server, with a key that exists only in server.json.
+    const cli = equal(req.headers['x-uc-cli'], cliKey) && (route === 'POST /api/shutdown' || route === 'GET /api/state');
+    const who = sessionOf(req);
+    if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
+    if (route === 'GET /api/usage') {
+      const range = RANGES.includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '30d';
+      return send(res, 200, await usageReport({ range, blockLimit: who.user.prefs.blockLimit, fresh: url.searchParams.get('fresh') === '1' }));
+    }
     const paste = req.method === 'POST' && /^\/api\/agents\/([^/]+)\/paste-image$/.exec(url.pathname);
     if (paste) {
       if (!project.agent(paste[1])) return send(res, 404, { error: 'Agent not found' });
@@ -241,10 +316,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         : path.join(PUBLIC, path.normalize(url.pathname === '/' ? 'index.html' : url.pathname).replace(/^([/\\]|\.\.)+/, ''));
       if (!file.startsWith(ROOT) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return send(res, 404, { error: 'Not found' });
       const isFont = file.endsWith('.woff2');
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': isFont ? 'max-age=604800' : 'no-store' });
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': isFont ? 'max-age=604800' : 'no-store', ...SECURITY });
       fs.createReadStream(file).pipe(res);
     } catch (err) {
-      if (!res.headersSent) send(res, 400, { error: err.message });
+      if (res.headersSent) return;
+      const known = err instanceof AuthError;
+      send(res, known ? err.status : 400, { error: err.message, ...(err.retryAfter ? { retryAfter: err.retryAfter } : {}) }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {});
     }
   });
 
@@ -252,8 +329,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const host = (req.headers.host || '').split(':')[0];
-    if (url.pathname !== '/ws' || url.searchParams.get('t') !== token || !['127.0.0.1', 'localhost'].includes(host)) return socket.destroy();
+    const who = sessionOf(req);
+    // only this server's own page may connect (the Origin check stops other websites), and only when signed in
+    if (url.pathname !== '/ws' || url.searchParams.get('t') !== token || !['127.0.0.1', 'localhost'].includes(host) || req.headers.origin !== `http://${req.headers.host}` || !who) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.session = who.session;
       clients.add(ws);
       for (const [id, r] of project.runtime) if (r.buffer) ws.send(JSON.stringify({ t: 'replay', id, d: r.buffer }));
       ws.on('message', (raw) => {
@@ -277,7 +357,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   }
   if (resume.length) project.save();
   const info = { port: actualPort, token, pid: process.pid, url: `http://127.0.0.1:${actualPort}/?t=${token}` };
-  fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify(info));
+  fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify({ ...info, cliKey }), { mode: 0o600 });
 
   if (autoExit) {
     // Stop the background server once the window is closed and no agent is running any more.

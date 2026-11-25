@@ -37,6 +37,7 @@ const setAttr = (el, name, value) => { if (el.getAttribute(name) !== String(valu
 async function api(method, url, body) {
   const res = await fetch(url, { method, headers: { 'content-type': 'application/json', 'x-uc-token': TOKEN }, body: body ? JSON.stringify(body) : undefined });
   const json = await res.json().catch(() => ({}));
+  if (res.status === 401 && !url.startsWith('/api/auth/')) { location.reload(); throw new Error('Please sign in.'); } // the session ended
   if (!res.ok) throw new Error(json.error || res.statusText);
   return json;
 }
@@ -619,7 +620,7 @@ const pendingReplay = new Map(); // terminal output that arrived before we knew 
 function ensureTerm(a) {
   if (terms.has(a.id)) return terms.get(a.id);
   const term = new Terminal({
-    fontFamily: '"Cascadia Mono", Consolas, "IBM Plex Mono", monospace', fontSize: 13, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
+    fontFamily: '"Cascadia Mono", Consolas, "IBM Plex Mono", monospace', fontSize: S.user?.prefs.termFont || 13, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
     theme: { background: '#0a0b0d', foreground: '#e7e9eb', cursor: '#e7e9eb', selectionBackground: '#373d44' },
   });
   const fit = new FitAddon.FitAddon();
@@ -1044,7 +1045,7 @@ function selectRole(id) {
 
 const createAgent = guard(async (body) => {
   const a = await api('POST', '/api/agents', body);
-  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  if (S.user?.prefs.notify && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   // Show its terminal right away: a first start may ask to trust the folder there.
   if (agentBy(a.id)) openAgent(a.id); else S.want = a.id;
 });
@@ -1079,16 +1080,21 @@ function onEvent(e) {
   animate(e);
   const jump = () => { const a = agentBy(e.agent); if (a) openAgent(a.id); };
   const notify = (title) => {
-    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification(title, { body: e.text });
+    if (document.hidden && S.user?.prefs.notify && 'Notification' in window && Notification.permission === 'granted') new Notification(title, { body: e.text });
   };
   if (e.type === 'waiting') { toast(`${e.agent} ${e.text}`, 'waiting', jump); notify(`${e.agent} needs you`); }
   else if (e.type === 'notify') { toast(`${e.agent}: ${e.text}`, 'waiting', jump); notify(`Message from ${e.agent}`); }
   else if (e.type === 'error') toast(`${e.agent} ${e.text}`, 'error');
 }
 
+// Live updates that arrive while the state is being fetched are newer than the fetched state.
+let liveSeen = 0;
+
 async function loadState() {
+  const seen = liveSeen;
   const st = await api('GET', '/api/state');
-  Object.assign(S, { project: st.project, roles: st.roles, tasks: st.tasks, noteCount: st.notes, sessions: st.sessions });
+  const stale = seen !== liveSeen;
+  Object.assign(S, { project: st.project, roles: st.roles, noteCount: st.notes, sessions: st.sessions, version: st.version }, stale ? {} : { tasks: st.tasks });
   // The window always loads the newest interface, the server keeps the code it started with.
   const outdated = !st.version || st.version !== st.latest;
   $('updateBar').hidden = !outdated;
@@ -1106,8 +1112,7 @@ async function loadState() {
   $('roleGrid').replaceChildren(...S.roles.map((r) => roleButton(r, () => selectRole(r.id))));
   $('feed').replaceChildren();
   for (const e of st.events) addEvent(e);
-  agentSig = null;
-  onAgents(st.agents);
+  if (!stale) { agentSig = null; onAgents(st.agents); }
 }
 
 function connect() {
@@ -1123,17 +1128,18 @@ function connect() {
     else if (m.t === 'replay') {
       const t = terms.get(m.id);
       if (t) { t.term.reset(); t.term.write(m.d); } else pendingReplay.set(m.id, m.d);
-    } else if (m.t === 'agents') onAgents(m.agents);
-    else if (m.t === 'tasks') { S.tasks = m.tasks; renderTasks(); syncSide(); }
+    } else if (m.t === 'agents') { liveSeen++; onAgents(m.agents); }
+    else if (m.t === 'tasks') { liveSeen++; S.tasks = m.tasks; renderTasks(); syncSide(); }
     else if (m.t === 'event') onEvent(m.e);
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') loadNotes(); } // keeps an open editor as it is
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     if (halted) return;
+    if (ev.code === 4401) return location.reload(); // signed out or removed elsewhere
     $('conn').classList.remove('on');
     setText($('connText'), 'reconnecting');
-    setTimeout(connect, 1500);
+    setTimeout(reconnect, 1500);
   };
 }
 
@@ -1142,6 +1148,328 @@ function halt(title, text) {
   stageObserver.disconnect();
   if (ws) { ws.onmessage = null; ws.close(); }
   document.body.replaceChildren(h('div', { class: 'halt' }, h('h1', {}, title), h('p', {}, text)));
+}
+
+// ---------- account: sign in, profile, settings, usage ----------
+
+const AUTH_TEXT = {
+  login: { title: 'Sign in', sub: 'Use your UltraClaude account to open this window.', go: 'Sign in', ask: 'New here?', to: 'Create an account' },
+  signup: { title: 'Create your account', sub: 'One account on this computer. It protects the window and keeps your settings.', go: 'Create account', ask: 'Already have an account?', to: 'Sign in' },
+};
+let authMode = 'login';
+
+const authError = (text) => { $('authError').hidden = !text; setText($('authError'), text); };
+
+function pwHint() {
+  const n = $('aPass').value.length;
+  $('pwHint').classList.toggle('ok', n >= 10);
+  setText($('pwHint'), n >= 10 ? 'Long enough. Avoid common words and your email.' : `At least 10 characters (${n}/10). A few random words make a strong password.`);
+}
+
+function showAuth(mode, notice = '') {
+  authMode = mode;
+  const t = AUTH_TEXT[mode];
+  document.body.classList.add('locked');
+  $('auth').hidden = false;
+  setText($('authTitle'), t.title); setText($('authSub'), t.sub); setText($('authGo'), t.go);
+  setText($('authSwitchText'), t.ask); setText($('authSwitch'), t.to);
+  $('nameFields').hidden = mode !== 'signup';
+  $('pwHint').hidden = mode !== 'signup';
+  $('aPass').autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
+  authError(notice);
+  pwHint();
+  $(mode === 'signup' ? 'aFirst' : 'aEmail').focus();
+}
+
+const initials = (u) => `${u.firstName[0] || ''}${u.lastName[0] || ''}`.toUpperCase();
+const fillAvatar = (el, u) => el.replaceChildren(u.avatar ? h('img', { src: u.avatar, alt: '' }) : initials(u));
+
+function renderProfile() {
+  fillAvatar($('profileAvatar'), S.user);
+  setText($('profileName'), `${S.user.firstName} ${S.user.lastName}`);
+  $('profileBtn').title = `${S.user.email} · account and settings`;
+  $('profileBtn').hidden = false;
+}
+
+/** Theme and terminal text size of the signed-in account. */
+function applyPrefs() {
+  const p = S.user.prefs;
+  if (p.theme === 'system') document.documentElement.removeAttribute('data-theme'); else document.documentElement.dataset.theme = p.theme;
+  for (const t of terms.values()) { t.term.options.fontSize = p.termFont; fitTerm(t); }
+}
+
+function enterApp(user) {
+  S.user = user;
+  applyPrefs();
+  renderProfile();
+  $('auth').hidden = true;
+  document.body.classList.remove('locked');
+  connect();
+}
+
+async function boot() {
+  try {
+    const me = await api('GET', '/api/auth/me');
+    if (me.user) enterApp(me.user); else showAuth(me.accounts ? 'login' : 'signup');
+  } catch (err) {
+    halt('UltraClaude cannot be reached', err.message);
+  }
+}
+
+async function reconnect() {
+  try {
+    const me = await api('GET', '/api/auth/me');
+    if (!me.user) return location.reload(); // signed out elsewhere: back to the sign-in screen
+    connect();
+  } catch { setTimeout(reconnect, 1500); }
+}
+
+// ---- settings window ----
+
+const field = (label, input) => h('label', { class: 'field' }, h('span', {}, label), input);
+const say = (el, text, kind = '') => { el.className = `msg ${kind}`; el.textContent = text; };
+const money = (n) => (n >= 100 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
+const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)}K` : String(n));
+const left = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
+const hhmm = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const savePrefs = async (patch) => { S.user = (await api('PATCH', '/api/auth/prefs', patch)).user; applyPrefs(); };
+
+/** A square 256 px picture from any photo, so the account file stays small. */
+async function squareAvatar(file) {
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(bmp.width, bmp.height);
+  const canvas = h('canvas', { width: 256, height: 256 });
+  canvas.getContext('2d').drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 256, 256);
+  return canvas.toDataURL('image/jpeg', 0.86);
+}
+
+function tabProfile() {
+  const u = S.user;
+  const avatar = h('span', { class: 'avatar big' });
+  fillAvatar(avatar, u);
+  const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+  file.addEventListener('change', guard(async () => {
+    const f = file.files[0];
+    file.value = '';
+    if (!f) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(f.type) || f.size > 10e6) throw new Error('Choose a PNG, JPEG or WebP picture under 10 MB.');
+    S.user = (await api('PATCH', '/api/auth/profile', { avatar: await squareAvatar(f) })).user;
+    fillAvatar(avatar, S.user); renderProfile();
+  }));
+  const remove = h('button', { type: 'button', class: 'link', onclick: guard(async () => { S.user = (await api('PATCH', '/api/auth/profile', { avatar: null })).user; fillAvatar(avatar, S.user); renderProfile(); }) }, 'Remove photo');
+  const first = h('input', { value: u.firstName, maxlength: 50, autocomplete: 'given-name' });
+  const last = h('input', { value: u.lastName, maxlength: 50, autocomplete: 'family-name' });
+  const email = h('input', { type: 'email', value: u.email, maxlength: 254, autocomplete: 'email', spellcheck: 'false' });
+  const pass = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200 });
+  const passField = field('Current password (needed to change your email)', pass);
+  passField.hidden = true;
+  email.addEventListener('input', () => { passField.hidden = email.value.trim().toLowerCase() === S.user.email; });
+  const msg = h('span', { class: 'msg' });
+  const save = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
+    const body = { firstName: first.value, lastName: last.value };
+    if (!passField.hidden) Object.assign(body, { email: email.value, password: pass.value });
+    try { S.user = (await api('PATCH', '/api/auth/profile', body)).user; renderProfile(); pass.value = ''; passField.hidden = true; fillAvatar(avatar, S.user); say(msg, 'Saved', 'ok'); } catch (err) { say(msg, err.message, 'bad'); }
+  } }, 'Save');
+  $('tab-profile').replaceChildren(
+    h('h2', {}, 'Profile'),
+    h('div', { class: 'who' }, avatar, h('div', { class: 'col' }, h('button', { type: 'button', class: 'btn', onclick: () => file.click() }, 'Upload photo'), file, remove)),
+    h('div', { class: 'group' }, h('div', { class: 'row2' }, field('First name', first), field('Last name', last)), field('Email', email), passField, h('div', { class: 'formrow' }, save, msg)),
+    h('p', { class: 'fine' }, `Account created ${new Date(u.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. Your account lives on this computer only.`));
+}
+
+function tabAppearance() {
+  const p = S.user.prefs;
+  const themes = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']];
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' }, themes.map(([v, label]) => h('button', {
+    type: 'button', class: p.theme === v ? 'on' : '', 'aria-pressed': String(p.theme === v),
+    onclick: guard(async () => { await savePrefs({ theme: v }); tabAppearance(); }),
+  }, label)));
+  const out = h('output', {}, `${p.termFont} px`);
+  const slider = h('input', { type: 'range', min: 10, max: 22, step: 1, value: p.termFont, 'aria-label': 'Terminal text size' });
+  slider.addEventListener('input', () => { out.textContent = `${slider.value} px`; for (const t of terms.values()) { t.term.options.fontSize = +slider.value; fitTerm(t); } });
+  slider.addEventListener('change', guard(() => savePrefs({ termFont: +slider.value })));
+  const notify = h('input', { type: 'checkbox', checked: p.notify });
+  notify.addEventListener('change', guard(async () => {
+    await savePrefs({ notify: notify.checked });
+    if (notify.checked && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  }));
+  $('tab-appearance').replaceChildren(
+    h('h2', {}, 'Appearance'),
+    h('div', { class: 'group' }, h('h3', {}, 'Theme'), seg, h('p', { class: 'fine' }, 'System follows your computer. The terminals stay dark in both themes.')),
+    h('div', { class: 'group' }, h('h3', {}, 'Terminal text size'), h('div', { class: 'range' }, slider, out)),
+    h('div', { class: 'group' }, h('h3', {}, 'Notifications'), h('label', { class: 'switch' }, notify, 'Tell me when an agent needs me and this window is in the background')));
+}
+
+// ---- usage ----
+
+let usageRange = '30d';
+let usageSeq = 0;
+
+function usageTable(head, rows) {
+  return h('table', { class: 'usage-table' },
+    h('thead', {}, h('tr', {}, head.map(([label, num]) => h('th', { class: num ? 'num' : '' }, label)))),
+    h('tbody', {}, rows.map((cells) => h('tr', {}, cells.map((c, i) => (c instanceof Node ? c : h('td', { class: head[i][1] ? 'num' : 'name', title: typeof c === 'string' ? c : '' }, c)))))));
+}
+const shareBar = (part, whole) => h('td', { class: 'share' }, h('div', { class: 'bar' }, h('i', { style: `width:${whole ? Math.max(2, (part / whole) * 100) : 0}%` })));
+const nameCell = (title, sub) => h('td', { class: 'name', title: `${title}${sub ? `\n${sub}` : ''}` }, title, sub ? h('small', {}, sub) : null);
+
+function blockCard(u) {
+  const b = u.block;
+  const limit = h('input', { type: 'number', min: 1000, step: 1000, placeholder: u.limit ? String(u.limit) : 'tokens', value: u.limitIsAuto ? '' : u.limit ?? '', 'aria-label': 'Token limit for one window' });
+  const set = h('button', { type: 'button', class: 'btn', onclick: guard(async () => { await savePrefs({ blockLimit: limit.value === '' ? null : Number(limit.value) }); tabUsage(true); }) }, 'Set');
+  const controls = h('p', { class: 'small' }, 'Your limit for one window:', limit, 'tokens ', set, u.limitIsAuto ? '' : h('button', { type: 'button', class: 'link', onclick: guard(async () => { await savePrefs({ blockLimit: null }); tabUsage(true); }) }, ' Use automatic'));
+  if (!b) return h('div', { class: 'block' }, h('h3', {}, 'Current 5-hour window'), h('p', { class: 'fine' }, 'No Claude Code activity in the last five hours. A new window starts with your next message.'), controls);
+  const pct = u.limit ? (b.tokens / u.limit) * 100 : 0;
+  return h('div', { class: 'block' },
+    h('h3', {}, 'Current 5-hour window', h('span', {}, `started ${hhmm(b.first)} · resets ${hhmm(b.end)}`)),
+    u.limit ? h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(Math.round(pct)), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'Share of the window limit used' }, h('i', { class: pct >= 100 ? 'over' : pct >= 80 ? 'hot' : '', style: `width:${Math.min(100, pct)}%` })) : null,
+    h('p', { class: 'fine', style: 'margin-top:8px' }, u.limit ? `${Math.round(pct)}% of ${fmt(u.limit)} tokens, ${u.limitIsAuto ? 'your busiest earlier window in the last 30 days' : 'the limit you set'}.` : 'Not enough history yet to compare this window with an earlier one.'),
+    h('div', { class: 'figures' },
+      h('div', {}, h('b', {}, fmt(b.tokens)), 'tokens'), h('div', {}, h('b', {}, money(b.cost)), 'API-equivalent cost'),
+      h('div', {}, h('b', {}, String(b.msgs)), 'messages'), h('div', {}, h('b', {}, b.perMinute ? `${fmt(b.perMinute)}/min` : '–'), 'pace'),
+      h('div', {}, h('b', {}, left(b.end - Date.now())), 'until it resets')),
+    controls);
+}
+
+function trendChart(daily) {
+  const days = daily.slice(-30);
+  const W = 720; const H = 120; const gap = 4;
+  const w = W / days.length - gap;
+  const max = Math.max(1, ...days.map((d) => d.tokens));
+  const bars = days.map((d, i) => svg('rect', { class: `bar-d${i === days.length - 1 ? ' today' : ''}`, x: (i * (w + gap)).toFixed(1), width: w.toFixed(1), y: (H - (d.tokens / max) * H).toFixed(1), height: Math.max(d.tokens ? 1.5 : 0, (d.tokens / max) * H).toFixed(1), rx: 1.5 },
+    svg('title', {}, `${new Date(`${d.date}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}: ${fmt(d.tokens)} tokens · ${money(d.cost)} · ${plural(d.msgs, 'message')}`)));
+  return svg('svg', { class: 'chart', viewBox: `0 -14 ${W} ${H + 34}`, role: 'img', 'aria-label': 'Tokens per day, last 30 days' },
+    svg('line', { class: 'grid', x1: 0, x2: W, y1: H + 0.5, y2: H + 0.5 }), svg('text', { x: 0, y: -4 }, `peak ${fmt(max)} tokens a day`), ...bars,
+    svg('text', { x: 0, y: H + 16 }, new Date(`${days[0].date}T12:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })),
+    svg('text', { x: W, y: H + 16, 'text-anchor': 'end' }, 'today'));
+}
+
+function heatmap(daily) {
+  const first = new Date(`${daily[0].date}T12:00`);
+  const offset = (first.getDay() + 6) % 7; // Monday first
+  const weeks = Math.ceil((daily.length + offset) / 7);
+  const sorted = daily.map((d) => d.tokens).filter(Boolean).sort((a, b) => a - b);
+  const level = (n) => (!n ? 0 : 1 + [0.25, 0.5, 0.75].filter((q) => n > sorted[Math.floor(q * (sorted.length - 1))]).length);
+  const opacity = [0.07, 0.28, 0.5, 0.75, 1];
+  const cell = 11; const step = 14; const top = 16;
+  const rects = daily.map((d, i) => {
+    const col = Math.floor((i + offset) / 7); const row = (i + offset) % 7;
+    return svg('rect', { x: col * step, y: top + row * step, width: cell, height: cell, rx: 2, 'fill-opacity': opacity[level(d.tokens)] },
+      svg('title', {}, `${new Date(`${d.date}T12:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}: ${d.tokens ? `${fmt(d.tokens)} tokens · ${money(d.cost)}` : 'no activity'}`));
+  });
+  const months = [];
+  daily.forEach((d, i) => { const dt = new Date(`${d.date}T12:00`); if (dt.getDate() <= 7 && ((i + offset) % 7) === 0) months.push(svg('text', { x: Math.floor((i + offset) / 7) * step, y: 9 }, dt.toLocaleDateString('en-GB', { month: 'short' }))); });
+  return svg('svg', { class: 'heat', viewBox: `0 0 ${weeks * step} ${top + 7 * step}`, role: 'img', 'aria-label': 'Activity over the last 26 weeks', style: `width:${Math.min(100, weeks * 3.9)}%;max-width:${weeks * step * 1.3}px` }, ...months, ...rects);
+}
+
+function drawUsage(u) {
+  const T = u.totals;
+  const periods = [['today', 'Today'], ['7d', '7 days'], ['30d', '30 days'], ['all', 'All time']];
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Period' }, periods.map(([v, label]) => h('button', { type: 'button', class: u.range === v ? 'on' : '', onclick: () => { usageRange = v; tabUsage(); } }, label)));
+  const csv = () => {
+    const text = `date,tokens,api_cost_usd,messages\n${u.daily.map((d) => `${d.date},${d.tokens},${d.cost.toFixed(4)},${d.msgs}`).join('\n')}\n`;
+    const a = h('a', { href: URL.createObjectURL(new Blob([text], { type: 'text/csv' })), download: 'ultraclaude-usage.csv' });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const empty = !T.msgs;
+  return [
+    h('h2', {}, 'Usage'),
+    h('p', { class: 'lead' }, 'What your Claude Code chats used, read from their history on this computer.'),
+    h('div', { class: 'usage-top' }, seg, h('button', { type: 'button', class: 'btn', onclick: () => tabUsage(true) }, 'Refresh'), h('button', { type: 'button', class: 'btn', onclick: csv }, 'Export CSV'), h('span', { class: 'upd' }, `${plural(u.files, 'chat file')} · updated ${hhmm(u.generated)}`)),
+    blockCard(u),
+    h('div', { class: 'stats' },
+      h('div', {}, h('b', {}, fmt(T.tokens)), h('span', {}, `tokens · ${fmt(T.i + T.o)} in/out, ${fmt(T.cw + T.cr)} cache`)),
+      h('div', {}, h('b', {}, money(T.cost)), h('span', {}, T.unpriced ? `API-equivalent · ${fmt(T.unpriced)} tokens unpriced` : 'API-equivalent cost')),
+      h('div', {}, h('b', {}, fmt(T.msgs)), h('span', {}, 'replies')),
+      h('div', {}, h('b', {}, String(T.sessions)), h('span', {}, `chats${u.streak > 1 ? ` · ${u.streak}-day streak` : ''}`))),
+    h('div', { class: 'group' }, h('h3', {}, 'Tokens per day'), trendChart(u.daily)),
+    h('div', { class: 'group' }, h('h3', {}, 'Activity, last 26 weeks'), heatmap(u.daily)),
+    empty ? h('p', { class: 'fine' }, 'Nothing in this period. Pick a longer one, or send a message in any Claude Code chat.') : h('div', { class: 'tab', style: 'gap:26px' },
+      h('div', { class: 'group' }, h('h3', {}, 'Models'), usageTable([['Model'], ['Tokens', 1], ['Cost', 1], ['Share']], u.models.map((m) => [nameCell(m.model), fmt(m.tokens), m.priced ? money(m.cost) : '–', shareBar(m.tokens, T.tokens)]))),
+      h('div', { class: 'group' }, h('h3', {}, 'Projects'), usageTable([['Folder'], ['Chats', 1], ['Tokens', 1], ['Cost', 1], ['Share']], u.projects.slice(0, 12).map((p) => [nameCell(p.name, p.dir), String(p.sessions), fmt(p.tokens), money(p.cost), shareBar(p.tokens, T.tokens)]))),
+      h('div', { class: 'group' }, h('h3', {}, 'Recent chats'), usageTable([['Chat'], ['Last active', 1], ['Tokens', 1], ['Cost', 1]], u.sessions.slice(0, 12).map((s) => [nameCell(s.title || `Chat ${s.id.slice(0, 8)}`, `${s.dir ? s.dir.split(/[\\/]/).pop() : ''} · ${s.model}`), ago(s.last), fmt(s.tokens), money(s.cost)])))),
+    h('p', { class: 'fine' }, 'Costs are what these tokens would cost at API list prices. A Claude Pro or Max subscription is not billed per token. The percentage Claude shows for your plan cannot be read here, because that needs your Claude login token and UltraClaude never touches it. The window above compares against your busiest earlier window, or the limit you set.'),
+  ];
+}
+
+async function tabUsage(fresh = false) {
+  const root = $('tab-usage');
+  const seq = ++usageSeq;
+  if (!root.children.length || fresh) root.replaceChildren(h('p', { class: 'loading' }, 'Reading your Claude Code history…'));
+  try {
+    const u = await api('GET', `/api/usage?range=${usageRange}${fresh ? '&fresh=1' : ''}`);
+    if (seq === usageSeq) root.replaceChildren(...drawUsage(u));
+  } catch (err) {
+    if (seq === usageSeq) root.replaceChildren(h('p', { class: 'form-error' }, err.message));
+  }
+}
+
+// ---- security ----
+
+const deviceName = (ua = '') => {
+  const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : '';
+  return os ? `${b} on ${os}` : b;
+};
+
+async function tabSecurity() {
+  const cur = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200 });
+  const next = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
+  const again = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
+  const msg = h('span', { class: 'msg' });
+  const change = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
+    if (next.value !== again.value) return say(msg, 'The two new passwords are different.', 'bad');
+    try { await api('POST', '/api/auth/password', { current: cur.value, next: next.value }); cur.value = next.value = again.value = ''; toast('Password changed. Your other devices were signed out.'); tabSecurity(); } catch (err) { say(msg, err.message, 'bad'); }
+  } }, 'Change password');
+
+  const sessionsBox = h('div', { class: 'list' }, h('div', {}, 'Loading…'));
+  const others = h('button', { type: 'button', class: 'btn', hidden: true, onclick: guard(async () => { await api('POST', '/api/auth/sessions/revoke-others', {}); tabSecurity(); }) }, 'Sign out everywhere else');
+
+  const pw = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200, 'aria-label': 'Your password' });
+  const dmsg = h('span', { class: 'msg' });
+  const confirmRow = h('div', { class: 'formrow', hidden: true }, field('Your password', pw),
+    h('button', { type: 'button', class: 'btn danger', onclick: async () => {
+      if (!confirm('Delete your account for good? Your settings and sessions are removed. Your projects and memory are not touched.')) return;
+      try { await api('DELETE', '/api/auth/account', { password: pw.value }); location.reload(); } catch (err) { say(dmsg, err.message, 'bad'); }
+    } }, 'Delete permanently'), dmsg);
+  const ask = h('button', { type: 'button', class: 'btn danger', onclick: () => { confirmRow.hidden = false; ask.hidden = true; pw.focus(); } }, 'Delete account…');
+
+  $('tab-security').replaceChildren(
+    h('h2', {}, 'Security'),
+    h('div', { class: 'group' }, h('h3', {}, 'Password'), h('div', { class: 'row2' }, field('Current password', cur), h('span')), h('div', { class: 'row2' }, field('New password', next), field('Repeat new password', again)), h('div', { class: 'formrow' }, change, msg), h('p', { class: 'fine' }, 'At least 10 characters. Changing it signs you out on every other device.')),
+    h('div', { class: 'group' }, h('h3', {}, 'Where you are signed in'), sessionsBox, h('div', { class: 'formrow' }, others)),
+    h('div', { class: 'group' }, h('h3', {}, 'How your account is protected'), h('p', { class: 'fine' }, 'Passwords are stored only as a salted scrypt hash. After five wrong tries an account is locked for a while. A session lasts 30 days and lives in a cookie that scripts cannot read and other websites cannot use. The window only talks to this computer.')),
+    h('div', { class: 'danger-zone group' }, h('h3', {}, 'Delete account'), h('p', { class: 'fine' }, 'Removes this account from this computer. Your projects, agents and memory stay as they are.'), ask, confirmRow));
+
+  try {
+    const { sessions } = await api('GET', '/api/auth/sessions');
+    sessionsBox.replaceChildren(...sessions.map((s) => h('div', {},
+      h('div', { class: 'grow' }, h('b', {}, deviceName(s.agent), s.current ? h('span', { class: 'chip' }, 'This device') : null), h('span', {}, `Signed in ${ago(s.createdAt)} ago · last active ${ago(s.lastSeen)} ago`)),
+      s.current ? null : h('button', { type: 'button', class: 'link', onclick: guard(async () => { await api('DELETE', `/api/auth/sessions/${s.id}`); tabSecurity(); }) }, 'Sign out'))));
+    others.hidden = sessions.length < 2;
+  } catch (err) { sessionsBox.replaceChildren(h('div', {}, err.message)); }
+}
+
+function tabAbout() {
+  const keys = [['Ctrl+V', 'Paste text, or attach a copied image'], ['Ctrl+C', 'Copy the selection, or interrupt Claude'], ['Shift+Enter', 'New line in the prompt'], ['Ctrl+S', 'Save a note in the memory editor'], ['Esc', 'Close a window or cancel an edit']];
+  $('tab-about').replaceChildren(
+    h('h2', {}, 'About'),
+    h('dl', { class: 'kv' },
+      h('dt', {}, 'Signed in as'), h('dd', {}, S.user.email), h('dt', {}, 'Version'), h('dd', { class: 'mono' }, S.version || '–'),
+      h('dt', {}, 'This project'), h('dd', { class: 'mono' }, S.project.dir), h('dt', {}, 'Memory vault'), h('dd', { class: 'mono' }, S.project.vault)),
+    h('div', { class: 'formrow' }, h('button', { type: 'button', class: 'btn', onclick: () => openInObsidian() }, 'Open in Obsidian'), h('button', { type: 'button', class: 'btn', onclick: guard(() => api('POST', '/api/open-vault-folder', {})) }, 'Open vault folder'), h('a', { class: 'link', href: 'https://github.com/ZH-NICO/ultraclaude', target: '_blank', rel: 'noopener noreferrer' }, 'GitHub')),
+    h('div', { class: 'group' }, h('h3', {}, 'Keyboard'), h('table', { class: 'keys' }, h('tbody', {}, keys.map(([k, what]) => h('tr', {}, h('td', {}, k), h('td', {}, what)))))));
+}
+
+const TABS = { profile: tabProfile, appearance: tabAppearance, usage: tabUsage, security: tabSecurity, about: tabAbout };
+
+function openSettings(tab = 'profile') {
+  const dlg = $('settingsDialog');
+  if (!dlg.open) dlg.showModal();
+  for (const b of $('setNav').querySelectorAll('button[data-tab]')) { b.classList.toggle('active', b.dataset.tab === tab); b.setAttribute('aria-current', String(b.dataset.tab === tab)); }
+  for (const name of Object.keys(TABS)) $(`tab-${name}`).hidden = name !== tab;
+  $('setBody').scrollTop = 0;
+  TABS[tab]();
 }
 
 // ---------- wiring ----------
@@ -1159,6 +1487,39 @@ $('selStop').addEventListener('click', stopPicked);
 $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('mapBtn').addEventListener('click', () => setView('map'));
+$('authSwitch').addEventListener('click', () => showAuth(authMode === 'login' ? 'signup' : 'login'));
+$('aPass').addEventListener('input', pwHint);
+for (const id of ['aFirst', 'aLast', 'aEmail', 'aPass']) $(id).addEventListener('input', () => authError('')); // an old error is no longer true once you type
+$('aShow').addEventListener('click', () => {
+  const show = $('aPass').type === 'password';
+  $('aPass').type = show ? 'text' : 'password';
+  setText($('aShow'), show ? 'Hide' : 'Show');
+  $('aShow').setAttribute('aria-pressed', String(show));
+});
+$('authForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const body = { email: $('aEmail').value.trim(), password: $('aPass').value };
+  if (authMode === 'signup') Object.assign(body, { firstName: $('aFirst').value, lastName: $('aLast').value });
+  const missing = !body.email || !body.password || (authMode === 'signup' && (!body.firstName.trim() || !body.lastName.trim()));
+  if (missing) return authError(authMode === 'signup' ? 'Fill in your name, email and password.' : 'Enter your email and password.');
+  authError('');
+  $('authGo').disabled = true;
+  try {
+    const { user } = await api('POST', `/api/auth/${authMode}`, body);
+    $('aPass').value = '';
+    enterApp(user);
+  } catch (err) {
+    authError(err.message);
+    $('aPass').focus();
+  } finally {
+    $('authGo').disabled = false;
+  }
+});
+$('profileBtn').addEventListener('click', () => openSettings('profile'));
+$('setNav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-tab]'); if (b) openSettings(b.dataset.tab); });
+$('setClose').addEventListener('click', () => $('settingsDialog').close());
+$('settingsDialog').addEventListener('click', (ev) => { if (ev.target === $('settingsDialog')) $('settingsDialog').close(); }); // a click on the dimmed area
+$('signOut').addEventListener('click', guard(async () => { await api('POST', '/api/auth/logout', {}); location.reload(); }));
 $('updateBtn').addEventListener('click', guard(async () => {
   await api('POST', '/api/restart', {});
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
@@ -1249,5 +1610,5 @@ const stageObserver = new ResizeObserver(() => syncGraph());
 stageObserver.observe($('stage'));
 
 vaultInfo = $('vaultInfo');
-if (TOKEN) connect();
+if (TOKEN) boot();
 else halt('Start UltraClaude from your terminal', 'Go to your project folder and run “ultraclaude”.');

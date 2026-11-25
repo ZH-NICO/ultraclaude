@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Vault, parseNote } from '../src/vault.js';
-import { startServer } from '../src/server.js';
+import { startTest } from './helper.js';
 import { describeTool } from '../src/project.js';
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `uc-${name}-`));
@@ -44,12 +44,12 @@ test('describeTool gives readable activity', () => {
 
 test('server: API, MCP tools, messages, tasks and hooks', async (t) => {
   const dir = tmp('proj');
-  const app = await startServer({ dir, vaultPath: tmp('v') });
+  const app = await startTest({ dir, vaultPath: tmp('v') });
   t.after(() => app.close());
   const { project } = app;
   project.startAgent = async () => {}; // never spawn a real Claude in tests
   const base = `http://127.0.0.1:${app.port}`;
-  const api = (method, url, body) => fetch(base + url, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+  const api = (method, url, body) => fetch(base + url, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
 
   assert.equal((await fetch(`${base}/api/state`)).status, 403, 'API needs the token');
   assert.equal((await fetch(`${base}/`)).status, 200);

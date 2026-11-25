@@ -14,6 +14,8 @@
   <a href="#every-chat-on-one-map">The map</a> ·
   <a href="#shared-memory">Memory</a> ·
   <a href="#keyboard">Keyboard</a> ·
+  <a href="#your-account">Account</a> ·
+  <a href="#usage">Usage</a> ·
   <a href="#how-it-works">How it works</a>
 </p>
 
@@ -128,6 +130,45 @@ The terminals behave like Windows Terminal.
 
 The prompt and status line stay at the bottom while you scroll the chat with the mouse wheel (Claude Code's fullscreen rendering). To turn that off, set `"tui"` to something other than `"fullscreen"` in your Claude Code settings.
 
+## Your account
+
+The window asks you to sign in. The first time you create an account with your name, email and a password. After that you sign in with email and password.
+
+Bottom left in the sidebar is your profile: your photo (or initials) and your name. It opens **Settings**, a window in the middle of the screen:
+
+| Section | What it does |
+| --- | --- |
+| **Profile** | Photo, first and last name, email |
+| **Appearance** | System, light or dark theme, terminal text size, desktop notifications |
+| **Usage** | What your Claude Code chats used, see below |
+| **Security** | Change your password, see and end sessions on other devices, delete the account |
+| **About** | Version, project and vault paths, keyboard shortcuts |
+
+Accounts are stored on your computer only, in `~/.ultraclaude/users.json`. There is no server and no email, which also means a forgotten password cannot be reset by mail. If you lose it, delete that file and create the account again. Your projects and memory are not touched.
+
+### What protects it
+
+- Passwords are never stored, only a salted scrypt hash. Every account has its own salt, and the file is readable only by you.
+- After five wrong passwords an account is locked for a while, longer with every further try. An unknown email and a wrong password give the same answer.
+- A session lasts 30 days and lives in an `HttpOnly`, `SameSite=Strict` cookie, so scripts cannot read it and other websites cannot use it. Only a hash of the session key is kept on the computer.
+- Everything the window asks for needs a signed-in account, the live terminal connection included. The server listens on `127.0.0.1` only, every call carries a secret from the window's address, and the live connection also checks that it comes from the window itself.
+- The page may only load files from the server itself, and cannot be shown inside another site.
+- Changing the password signs out every other device. The command line (`ultraclaude stop` and the update restart) uses a separate key that only exists in `<project>/.ultraclaude/server.json`.
+
+This keeps other people, other websites and other programs in your browser out. It does not protect you from malware that runs as you on your computer: that can read your files, as it could for any program.
+
+## Usage
+
+**Settings → Usage** shows what your Claude Code chats have used, read from their history on your computer. Nothing is sent anywhere.
+
+- **The current 5-hour window**: tokens, cost, pace and when it resets, compared with your busiest earlier window or a limit you set.
+- **Totals** for today, 7 days, 30 days or all time: tokens (input, output, cache), estimated cost, replies and chats.
+- **Tokens per day** for the last 30 days and an **activity map** of the last 26 weeks.
+- **Models, projects and recent chats**, each with tokens, cost and share.
+- **Export CSV** of the daily numbers.
+
+Costs are what the same tokens would cost at API list prices. A Pro or Max subscription is not billed per token. The percentage Claude shows for your plan is not part of this: reading it would need your Claude login token, and UltraClaude never touches that.
+
 ## Shared memory
 
 The default vault is `~/UltraClaudeVault`. Change it with `ultraclaude vault <path>`, for example to a folder inside a vault you already use.
@@ -181,7 +222,7 @@ ultraclaude --no-open     start the server without a window
 ## Development
 
 ```bash
-npm test    # vault, files, messages, tasks, hooks, MCP, sessions, the chat map and the HTTP API
+npm test    # accounts, sign-in and who may connect, usage, vault, files, messages, tasks, hooks, MCP, sessions, the chat map and the HTTP API
 ```
 
 ```
@@ -189,6 +230,8 @@ bin/ultraclaude.js   command line
 src/server.js        HTTP, WebSocket, MCP endpoint and hook endpoint
 src/project.js       agents, messages, tasks, hook logic
 src/mcp.js           the team tools
+src/accounts.js      accounts, passwords, sessions
+src/usage.js         token usage read from Claude Code's history
 src/vault.js         the Obsidian vault and its files
 src/history.js       earlier Claude Code sessions, memory and every chat on the computer
 src/roles.js         roles and the agent prompt

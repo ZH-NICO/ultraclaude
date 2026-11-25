@@ -8,16 +8,16 @@ import path from 'node:path';
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `uc-${name}-`));
 process.env.CLAUDE_CONFIG_DIR = tmp('claude');
-const { startServer } = await import('../src/server.js');
+const { startTest } = await import('./helper.js');
 
 test('notes and folders can be managed from the Memory view', async (t) => {
   const vault = tmp('vault');
-  const app = await startServer({ dir: tmp('proj'), vaultPath: vault });
+  const app = await startTest({ dir: tmp('proj'), vaultPath: vault });
   t.after(() => app.close());
   const { project } = app;
   const mem = `${project.vault.rel(project.vault.projectDir)}/Memory`;
   const call = async (method, url, body) => {
-    const res = await fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    const res = await fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
     return { status: res.status, ...(await res.json()) };
   };
   const file = (rel) => path.join(vault, ...rel.split('/'));

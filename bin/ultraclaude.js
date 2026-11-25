@@ -43,7 +43,7 @@ async function running() {
 /** Replaces a server that runs older code. Agents that were running continue their sessions in the new one. */
 async function replace(info) {
   const base = `http://127.0.0.1:${info.port}`;
-  const headers = { 'x-uc-token': info.token };
+  const headers = { 'x-uc-token': info.token, 'x-uc-cli': info.cliKey || '' };
   let runningIds = [];
   try {
     const state = await (await fetch(`${base}/api/state`, { headers })).json();
@@ -115,7 +115,7 @@ if (flags.has('-h') || flags.has('--help') || command === 'help') {
   const info = await running();
   if (!info) console.log('UltraClaude is not running for this folder.');
   else {
-    await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, { method: 'POST', headers: { 'x-uc-token': info.token } }).catch(() => {});
+    await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, { method: 'POST', headers: { 'x-uc-token': info.token, 'x-uc-cli': info.cliKey || '' } }).catch(() => {});
     console.log('UltraClaude stopped.');
   }
 } else if (command === 'status') {

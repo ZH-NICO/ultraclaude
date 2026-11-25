@@ -7,17 +7,17 @@ import path from 'node:path';
 
 const tmp = (name) => fs.mkdtempSync(path.join(os.tmpdir(), `uc-${name}-`));
 process.env.CLAUDE_CONFIG_DIR = tmp('claude');
-const { startServer } = await import('../src/server.js');
+const { startTest } = await import('./helper.js');
 
 test('image paste is saved and typed into the prompt as a bracketed paste', async (t) => {
   const dir = tmp('proj');
-  const app = await startServer({ dir, vaultPath: tmp('v') });
+  const app = await startTest({ dir, vaultPath: tmp('v') });
   t.after(() => app.close());
   const { project } = app;
   project.startAgent = async () => {};
   const agent = project.createAgent({ roleId: 'tester' });
   const typed = [];
-  const post = (id, body, type) => fetch(`http://127.0.0.1:${app.port}/api/agents/${id}/paste-image`, { method: 'POST', headers: { 'x-uc-token': app.token, 'content-type': type }, body });
+  const post = (id, body, type) => fetch(`http://127.0.0.1:${app.port}/api/agents/${id}/paste-image`, { method: 'POST', headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': type }, body });
   const png = Buffer.from('89504e470d0a1a0a', 'hex');
 
   let res = await post(agent.id, png, 'image/png');

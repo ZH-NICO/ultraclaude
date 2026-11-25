@@ -8,7 +8,33 @@
   <link rel="stylesheet" href="/vendor/xterm.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="locked">
+  <div class="auth" id="auth" hidden>
+    <div class="auth-card">
+      <div class="auth-brand">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 10V3.4M10 10l5.7 3.3M10 10l-5.7 3.3" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/><circle cx="10" cy="3.4" r="1.7" fill="currentColor"/><circle cx="15.7" cy="13.3" r="1.7" fill="currentColor"/><circle cx="4.3" cy="13.3" r="1.7" fill="currentColor"/></svg>
+        ultraclaude
+      </div>
+      <h1 id="authTitle">Sign in</h1>
+      <p class="auth-sub" id="authSub"></p>
+      <form id="authForm" novalidate>
+        <div class="two" id="nameFields" hidden>
+          <label class="field"><span>First name</span><input id="aFirst" autocomplete="given-name" maxlength="50"></label>
+          <label class="field"><span>Last name</span><input id="aLast" autocomplete="family-name" maxlength="50"></label>
+        </div>
+        <label class="field"><span>Email</span><input id="aEmail" type="email" autocomplete="email" maxlength="254" spellcheck="false"></label>
+        <label class="field"><span>Password</span>
+          <span class="pw"><input id="aPass" type="password" autocomplete="current-password" maxlength="200"><button type="button" class="link" id="aShow" aria-pressed="false">Show</button></span>
+        </label>
+        <p class="hint" id="pwHint" hidden></p>
+        <p class="form-error" id="authError" role="alert" hidden></p>
+        <button class="btn primary wide" id="authGo">Sign in</button>
+      </form>
+      <p class="auth-switch"><span id="authSwitchText"></span> <button type="button" class="link" id="authSwitch"></button></p>
+      <p class="auth-foot">Your account is stored on this computer only. Passwords are never saved, only a salted hash.</p>
+    </div>
+  </div>
+
   <aside class="side">
     <div class="brand">
       <button type="button" class="wordmark" id="mapBtn" title="Map of all your Claude Code chats">
@@ -56,6 +82,11 @@
       <span class="conn"><i class="dot" id="conn"></i><span id="connText">connecting</span></span>
       <button type="button" class="link" id="quit" title="Stop all agents and the server for this project">Quit</button>
     </div>
+    <button type="button" class="profile" id="profileBtn" hidden title="Account and settings">
+      <span class="avatar" id="profileAvatar"></span>
+      <span class="pname" id="profileName"></span>
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6.7 1.5h2.6l.4 1.9 1.3.6 1.7-1 1.8 1.8-1 1.7.6 1.3 1.9.4v2.6l-1.9.4-.6 1.3 1 1.7-1.8 1.8-1.7-1-1.3.6-.4 1.9H6.7l-.4-1.9-1.3-.6-1.7 1-1.8-1.8 1-1.7-.6-1.3-1.9-.4V6.7l1.9-.4.6-1.3-1-1.7 1.8-1.8 1.7 1 1.3-.6z" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>
+    </button>
   </aside>
 
   <main id="main">
@@ -178,6 +209,28 @@
         <button class="btn primary" id="agentCreate">Start agent</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="settings" aria-labelledby="setTitle">
+    <div class="set-shell">
+      <nav class="set-nav" id="setNav" aria-label="Settings">
+        <h1 id="setTitle">Settings</h1>
+        <button type="button" data-tab="profile" class="active">Profile</button>
+        <button type="button" data-tab="appearance">Appearance</button>
+        <button type="button" data-tab="usage">Usage</button>
+        <button type="button" data-tab="security">Security</button>
+        <button type="button" data-tab="about">About</button>
+        <button type="button" class="link signout" id="signOut">Sign out</button>
+      </nav>
+      <div class="set-body" id="setBody">
+        <button type="button" class="set-close" id="setClose" aria-label="Close settings">×</button>
+        <section class="tab" id="tab-profile"></section>
+        <section class="tab" id="tab-appearance" hidden></section>
+        <section class="tab" id="tab-usage" hidden></section>
+        <section class="tab" id="tab-security" hidden></section>
+        <section class="tab" id="tab-about" hidden></section>
+      </div>
+    </div>
   </dialog>
 
   <div id="toasts" aria-live="polite"></div>
