@@ -50,13 +50,13 @@ function callTool(project, agent, name, args = {}) {
       return 'Status updated.';
     case 'memory_search': {
       const hits = project.vault.search(args.query);
-      project.event('memory', agent.name, `searched memory for “${args.query}” (${hits.length} ${hits.length === 1 ? 'hit' : 'hits'})`, { op: 'read' });
+      project.event('memory', agent.name, `searched memory for “${args.query}” (${hits.length} ${hits.length === 1 ? 'hit' : 'hits'})`, { op: 'read', paths: hits.map((h) => h.path) });
       return hits.length ? hits.map((h) => `## ${h.title}  (${h.path}, updated ${h.updated})\n${h.excerpt}`).join('\n\n') : 'Nothing found in shared memory.';
     }
     case 'memory_read': {
       const n = project.vault.read(args.note);
       if (!n) throw new Error(`No note "${args.note}". Use memory_list or memory_search.`);
-      project.event('memory', agent.name, `read “${n.title}” from memory`, { op: 'read' });
+      project.event('memory', agent.name, `read “${n.title}” from memory`, { op: 'read', path: n.path });
       return `# ${n.title}\n(${n.path} · updated ${n.updated} · authors: ${n.authors.join(', ') || '?'}${n.tags.length ? ` · tags: ${n.tags.join(', ')}` : ''})\n\n${n.body}`;
     }
     case 'memory_write': {

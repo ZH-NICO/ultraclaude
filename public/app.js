@@ -2,6 +2,7 @@
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const $ = (id) => document.getElementById(id);
 import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
+import { layout, degrees, dotSize, panZoom } from './graph.js';
 
 const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
@@ -72,7 +73,7 @@ function setView(view) {
   syncSide();
   if (view === 'overview') { syncGraph(); $('feed').scrollTop = $('feed').scrollHeight; }
   if (view === 'agents') layoutTerms();
-  if (view === 'memory') loadNotes();
+  if (view === 'memory') { loadNotes(); if (G.mode === 'graph') loadGraph(); }
   if (view === 'map') loadChats();
   if (view === 'replay') loadReplay();
   if (view !== 'replay') rpPause();
@@ -886,13 +887,13 @@ function showFolder(p) {
 }
 
 /** The editor, for a new note (folder given) or an existing one (path and its current text given). */
-function showEditor({ folder = null, path = null, content = '' }) {
+function showEditor({ folder = null, path = null, content = '', title = '' }) {
   S.editing = true;
   const isNew = !path;
   const folders = foldersIn(S.tree).filter((d) => !d.readOnly);
   const where = isNew ? h('select', { 'aria-label': 'Folder' }, h('option', { value: '' }, 'Vault (top level)'), folders.map((d) => h('option', { value: d.path }, d.path))) : null;
   if (where) where.value = folders.some((d) => d.path === folder) ? folder : '';
-  const name = isNew ? h('input', { placeholder: 'Name of the note', 'aria-label': 'Name of the note', spellcheck: 'false' }) : null;
+  const name = isNew ? h('input', { placeholder: 'Name of the note', 'aria-label': 'Name of the note', spellcheck: 'false', value: title }) : null;
   const text = h('textarea', { spellcheck: 'false', 'aria-label': 'Note text', placeholder: 'What should every agent know? Markdown works, and [[Note name]] links to another note.' });
   text.value = content;
   const original = content;
@@ -1080,6 +1081,7 @@ function onAgents(agents) {
 function onEvent(e) {
   addEvent(e);
   animate(e);
+  if (e.type === 'memory') graphPulse(e.paths || (e.path ? [e.path] : []), e.op === 'write' ? 'write' : 'read');
   const jump = () => { const a = agentBy(e.agent); if (a) openAgent(a.id); };
   const notify = (title) => {
     if (document.hidden && S.user?.prefs.notify && 'Notification' in window && Notification.permission === 'granted') new Notification(title, { body: e.text });
@@ -1134,7 +1136,7 @@ function connect() {
     else if (m.t === 'tasks') { liveSeen++; S.tasks = m.tasks; renderTasks(); syncSide(); }
     else if (m.t === 'event') onEvent(m.e);
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
-    else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') loadNotes(); } // keeps an open editor as it is
+    else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
   ws.onclose = (ev) => {
     if (halted) return;
@@ -1636,6 +1638,89 @@ function rpPlay() {
   RP.raf = requestAnimationFrame(rpTick);
 }
 
+// ---------- memory graph ----------
+// The notes as a network, linked by their [[wikilinks]]. Agents reading or writing a note make its dot light up.
+
+const G = { mode: 'list', data: null, pos: new Map(), degree: new Map(), view: null, nodes: new Map(), pz: null, timer: 0 };
+
+function setMemMode(mode) {
+  G.mode = mode;
+  for (const b of $('memMode').children) b.classList.toggle('on', b.dataset.mode === mode);
+  document.querySelector('#view-memory .memory').hidden = mode === 'graph';
+  $('memGraph').hidden = mode !== 'graph';
+  if (mode === 'graph') loadGraph();
+}
+
+const loadGraph = guard(async () => {
+  const before = new Set(G.data?.nodes.map((n) => n.id));
+  G.data = await api('GET', '/api/graph');
+  $('gEmpty').hidden = G.data.nodes.length > 0;
+  const stage = $('gStage');
+  G.pos = layout(G.data.nodes, G.data.links, { width: Math.max(600, stage.clientWidth), height: Math.max(400, stage.clientHeight) });
+  G.degree = degrees(G.data.nodes, G.data.links);
+  // the zoom and position are created at startup
+  renderGraph(before.size ? before : null);
+  if (!G.fitted && G.data.nodes.length) { G.fitted = true; fitGraph(); } // later updates keep your zoom and position
+});
+
+function fitGraph() {
+  const stage = $('gStage');
+  const w = stage.clientWidth; const ht = stage.clientHeight;
+  if (!w || !ht || !G.pos.size) return;
+  const xs = [...G.pos.values()].map((p) => p.x); const ys = [...G.pos.values()].map((p) => p.y);
+  const bw = Math.max(1, Math.max(...xs) - Math.min(...xs)); const bh = Math.max(1, Math.max(...ys) - Math.min(...ys));
+  const k = Math.min(2.2, (w - 160) / bw, (ht - 120) / bh);
+  Object.assign(G.view, { x: w / 2 - ((Math.max(...xs) + Math.min(...xs)) / 2) * k, y: ht / 2 - ((Math.max(...ys) + Math.min(...ys)) / 2) * k, k }); // in place: the pan and zoom handler holds this object
+  applyGraphView();
+}
+
+function applyGraphView() {
+  const world = $('gWorld');
+  if (!world || !G.view) return;
+  world.setAttribute('transform', `translate(${G.view.x.toFixed(1)},${G.view.y.toFixed(1)}) scale(${G.view.k.toFixed(4)})`);
+  $('gSvg').classList.toggle('far', G.view.k < 0.7);
+}
+
+function renderGraph(previous) {
+  const { nodes, links } = G.data;
+  if (!G.view) G.view = { x: 0, y: 0, k: 1 };
+  const lines = links.map((l) => { const a = G.pos.get(l.source); const b = G.pos.get(l.target); return a && b ? svg('line', { class: 'gl', x1: a.x.toFixed(1), y1: a.y.toFixed(1), x2: b.x.toFixed(1), y2: b.y.toFixed(1) }) : null; }).filter(Boolean);
+  G.nodes.clear();
+  const dots = nodes.map((n) => {
+    const p = G.pos.get(n.id);
+    const r = dotSize(n, G.degree.get(n.id));
+    const g = svg('g', { class: `gn ${n.kind.replace(/\s+/g, '-')}${G.degree.get(n.id) >= 3 ? ' big' : ''}${previous && !previous.has(n.id) ? ' fresh' : ''}`, transform: `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`, tabindex: 0, role: 'button', 'aria-label': n.title },
+      svg('title', {}, `${n.title}\n${n.ghost ? 'Linked, but no note with this name yet. Click to write it.' : `${n.id}\n${n.updated}${n.authors.length ? ` · ${n.authors.join(', ')}` : ''}`}`),
+      svg('circle', { class: 'hit', r: Math.max(r + 5, 10) }), svg('circle', { class: 'dot', r: r.toFixed(1) }),
+      svg('text', { x: (r + 5).toFixed(1), y: 4 }, cut(n.title, 30)));
+    const open = () => { if (G.pz?.wasDrag()) return; if (n.ghost) { setMemMode('list'); showEditor({ folder: `${S.projectRel}/Memory`, title: n.title }); } else { setMemMode('list'); openNote(n.id); } };
+    g.addEventListener('click', open);
+    g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
+    G.nodes.set(n.id, { g, r, p });
+    return g;
+  });
+  $('gSvg').replaceChildren(svg('g', { id: 'gWorld' }, ...lines, svg('g', { id: 'gRings' }), ...dots));
+  applyGraphView();
+}
+
+/** Makes the dot of a note light up, for example when an agent reads or writes it. */
+function graphPulse(paths, kind) {
+  const rings = $('gRings');
+  if (!rings || calm || S.view !== 'memory' || G.mode !== 'graph') return;
+  for (const path of paths) {
+    const nd = G.nodes.get(path);
+    if (!nd) continue;
+    const ring = svg('circle', { class: `g-ring ${kind}`, cx: nd.p.x.toFixed(1), cy: nd.p.y.toFixed(1), r: nd.r });
+    rings.append(ring);
+    ring.animate([{ r: nd.r + 2, opacity: 0.9 }, { r: nd.r + 26, opacity: 0 }], { duration: 1100, easing: 'ease-out' }).finished.then(() => ring.remove(), () => ring.remove());
+  }
+}
+
+function scheduleGraph() {
+  clearTimeout(G.timer);
+  G.timer = setTimeout(() => { if (S.view === 'memory' && G.mode === 'graph') loadGraph(); }, 500);
+}
+
 // ---------- wiring ----------
 
 $('nav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
@@ -1651,6 +1736,11 @@ $('selStop').addEventListener('click', stopPicked);
 $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('mapBtn').addEventListener('click', () => setView('map'));
+$('memMode').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-mode]'); if (b) setMemMode(b.dataset.mode); });
+G.pz = panZoom($('gStage'), (G.view = { x: 0, y: 0, k: 1 }), applyGraphView, { min: 0.15, max: 5 });
+$('gFit').addEventListener('click', fitGraph);
+$('gIn').addEventListener('click', () => { if (G.view) { G.view.k = Math.min(5, G.view.k * 1.4); applyGraphView(); } });
+$('gOut').addEventListener('click', () => { if (G.view) { G.view.k = Math.max(0.15, G.view.k / 1.4); applyGraphView(); } });
 $('rpPlay').addEventListener('click', () => (RP.playing ? rpPause() : rpPlay()));
 $('rpLive').addEventListener('click', () => { rpPause(); rpSeek(RP.to, false); });
 $('rpSlider').addEventListener('input', () => { rpPause(); RP.shown = -1; rpSeek(rpAt(Number($('rpSlider').value)), false); });

@@ -210,6 +210,10 @@
         <h1>Memory</h1>
         <p class="sub mono" id="vaultPath"></p>
         <div class="head-actions">
+          <div class="seg" id="memMode" role="group" aria-label="Show memory as">
+            <button type="button" class="on" data-mode="list">List</button>
+            <button type="button" data-mode="graph">Graph</button>
+          </div>
           <button type="button" class="btn primary" id="newNote">New note</button>
           <button type="button" class="btn" id="newFolder">New folder</button>
           <button type="button" class="btn" id="openObsidian">Open in Obsidian</button>
@@ -229,6 +233,18 @@
             <p id="obsidianHint" hidden>Obsidian does not know this folder yet. In Obsidian choose <b>Open folder as vault</b> and pick the path shown above. After that, notes open directly from here.</p>
           </div>
         </article>
+      </div>
+      <div class="memgraph" id="memGraph" hidden>
+        <div class="map-stage" id="gStage">
+          <svg id="gSvg" role="img" aria-label="Your notes as a network, linked by their wikilinks"></svg>
+          <div class="map-zoom">
+            <button type="button" class="btn" id="gIn" aria-label="Zoom in">+</button>
+            <button type="button" class="btn" id="gOut" aria-label="Zoom out">−</button>
+            <button type="button" class="btn" id="gFit">Fit</button>
+          </div>
+          <p class="map-hint">Scroll to zoom · drag to move · click a note to open it · dashed dots are links to notes that do not exist yet</p>
+          <p class="map-empty" id="gEmpty" hidden>No notes yet. When your agents save what they learn, it shows up here as a network.</p>
+        </div>
       </div>
     </section>
   </main>

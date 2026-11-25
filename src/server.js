@@ -200,6 +200,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const cli = equal(req.headers['x-uc-cli'], cliKey) && (route === 'POST /api/shutdown' || route === 'GET /api/state');
     const who = sessionOf(req);
     if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
+    if (route === 'GET /api/graph') return send(res, 200, project.vault.graph());
     if (route === 'GET /api/replay') {
       const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
       const events = project.recorded({ since, limit: 8000 });

@@ -97,6 +97,47 @@ export class Vault {
     return p;
   }
 
+  /**
+   * The notes as a network: one node per note, one link per [[wikilink]]. Links to notes that do not
+   * exist yet become "ghost" nodes, like in Obsidian. Agent notes, the board and the journal are left out.
+   */
+  graph(limit = 800) {
+    // agent notes, the board and the journal are bookkeeping, and so are the start pages UltraClaude makes
+    const bookkeeping = /^Projects\/[^/]+\/(Agents|Tasks|Log)\//;
+    const skip = { test: (rel) => bookkeeping.test(rel) || rel === 'Home.md' || /^Projects\/([^/]+)\/\1\.md$/.test(rel) };
+    const all = this.#walk(this.root).map((f) => ({ f, rel: this.rel(f) }));
+    const hidden = new Set(all.filter((x) => skip.test(x.rel)).map((x) => path.basename(x.f, '.md').toLowerCase())); // links to these are not shown
+    const files = all.filter((x) => !skip.test(x.rel))
+      .map((x) => ({ ...x, mtime: fs.statSync(x.f).mtimeMs })).sort((a, b) => b.mtime - a.mtime).slice(0, limit);
+    const byTitle = new Map();
+    const nodes = files.map(({ f, rel }) => {
+      const info = this.#info(f, true);
+      const id = rel;
+      if (!byTitle.has(info.title.toLowerCase())) byTitle.set(info.title.toLowerCase(), id);
+      return { id, title: info.title, kind: info.kind, updated: info.updated, authors: info.authors, size: info.body.length, body: info.body };
+    });
+    const ids = new Set(nodes.map((n) => n.id));
+    const ghosts = new Map();
+    const links = [];
+    const seen = new Set();
+    for (const n of nodes) {
+      for (const m of n.body.matchAll(/\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) {
+        const name = m[1].trim();
+        let target = ids.has(name) ? name : byTitle.get(name.toLowerCase().replace(/\.md$/, ''));
+        if (!target && hidden.has(name.toLowerCase())) continue;
+        if (!target) {
+          const key = name.toLowerCase();
+          if (!ghosts.has(key)) ghosts.set(key, { id: `ghost:${name}`, title: name, kind: 'Missing', updated: '', authors: [], size: 0, ghost: true });
+          target = ghosts.get(key).id;
+        }
+        const key = `${n.id}>${target}`;
+        if (target !== n.id && !seen.has(key)) { seen.add(key); links.push({ source: n.id, target }); }
+      }
+    }
+    for (const n of nodes) delete n.body;
+    return { nodes: [...nodes, ...ghosts.values()], links };
+  }
+
   // ---------- files and folders, as the person sees them in the Memory view ----------
 
   /** A vault-relative path the person typed, checked and normalised. Notes always end in .md. */

@@ -99,6 +99,10 @@ Click **ultraclaude** at the top left. Your drive sits in the middle, every fold
   <sub>Shown on a made-up drive.</sub>
 </p>
 
+## Memory graph
+
+In **Memory**, switch from *List* to *Graph* to see your notes as a network, linked by their `[[wikilinks]]`. Scroll to zoom, drag to move, click a note to open it. Dashed dots are links to notes that don't exist yet; click one to write it. When an agent reads or writes a note, its dot lights up, and new notes appear on their own.
+
 ## Replay
 
 Everything your agents do is recorded in the project (`.ultraclaude/events.jsonl`). **Replay** in the sidebar winds it back: drag the slider to any moment and the graph shows who was working, who was waiting for you and what each one was doing. **Play** runs it forward at 1×, 10×, 60× or 300× with the messages and memory access flying through the graph again. A strip above the slider shows when things happened, and quiet stretches are skipped.
