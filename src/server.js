@@ -189,7 +189,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     project.saveNow();
     for (const ws of clients) ws.terminate();
     try { fs.unlinkSync(path.join(project.dataDir, 'server.json')); } catch { /* not written */ }
-    await new Promise((r) => server.close(r));
+    await new Promise((r) => { server.close(r); server.closeAllConnections?.(); }); // a half-read answer must not keep it open
   };
 
   async function api(req, res, url) {
@@ -200,6 +200,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const cli = equal(req.headers['x-uc-cli'], cliKey) && (route === 'POST /api/shutdown' || route === 'GET /api/state');
     const who = sessionOf(req);
     if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
+    if (route === 'GET /api/replay') {
+      const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
+      const events = project.recorded({ since, limit: 8000 });
+      return send(res, 200, { events, first: events[0]?.ts ?? null, last: events.at(-1)?.ts ?? null, now: Date.now() });
+    }
     if (route === 'GET /api/usage') {
       const range = RANGES.includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '30d';
       return send(res, 200, await usageReport({ range, blockLimit: who.user.prefs.blockLimit, fresh: url.searchParams.get('fresh') === '1' }));

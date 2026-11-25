@@ -1,7 +1,9 @@
 /* global Terminal, FitAddon */
 const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const $ = (id) => document.getElementById(id);
-const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map'];
+import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
+
+const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -72,6 +74,8 @@ function setView(view) {
   if (view === 'agents') layoutTerms();
   if (view === 'memory') loadNotes();
   if (view === 'map') loadChats();
+  if (view === 'replay') loadReplay();
+  if (view !== 'replay') rpPause();
 }
 
 // ---------- map of all chats ----------
@@ -546,8 +550,7 @@ function updateNode(a) {
   setText(nd.title, [a.name, a.roleName !== a.name ? a.roleName : '', STATE[a.state], a.activity].filter(Boolean).join(' · '));
 }
 
-function fly(from, to, trace) {
-  const layer = $('pulses');
+function fly(from, to, trace, layer = $('pulses')) {
   if (!layer) return;
   const done = (el) => () => el.remove();
   if (trace) {
@@ -561,8 +564,7 @@ function fly(from, to, trace) {
     { duration: 750, easing: 'cubic-bezier(.4,0,.2,1)' }).finished.then(done(dot), done(dot));
 }
 
-function ping(at, cls = '') {
-  const layer = $('pulses');
+function ping(at, cls = '', layer = $('pulses')) {
   if (!layer) return;
   const ring = svg('circle', { class: `g-ping ${cls}`, r: 6 });
   layer.append(ring);
@@ -1497,6 +1499,143 @@ function openSettings(tab = 'profile') {
   TABS[tab]();
 }
 
+// ---------- replay ----------
+// Winds the recording back: the team as it was at the chosen moment, played forward at your speed.
+// Quiet stretches are skipped, so ten minutes of nothing do not take ten minutes.
+
+const RP = { events: [], from: 0, to: 0, t: 0, playing: false, raf: 0, last: 0, names: [], pos: new Map(), hub: { x: 0, y: 0 }, nodes: new Map(), layer: null, shown: -1, sig: '' };
+const rpAt = (v) => Math.round(RP.from + (v / 1000) * (RP.to - RP.from));
+const rpValue = (t) => Math.round(((t - RP.from) / Math.max(1, RP.to - RP.from)) * 1000);
+const rpClock = (t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+const loadReplay = guard(async () => {
+  const range = Number($('replayRange').value);
+  const r = await api('GET', `/api/replay?since=${range ? Date.now() - range : 0}`);
+  RP.events = r.events;
+  RP.names = agentsIn(r.events);
+  RP.from = r.events[0]?.ts ?? r.now;
+  // the timeline ends now while things are still happening, otherwise at the last event
+  const last = r.events.at(-1)?.ts ?? r.now;
+  RP.to = r.now - last < 5 * 60e3 ? r.now : last;
+  RP.t = RP.to;
+  RP.shown = -1;
+  rpPause();
+  const empty = !r.events.length;
+  $('replayEmpty').hidden = !empty;
+  $('replayGraph').style.visibility = empty ? 'hidden' : 'visible';
+  setText($('replaySub'), empty ? '' : `${plural(r.events.length, 'event')} · ${plural(RP.names.length, 'agent')}`);
+  buildReplayGraph();
+  const bars = density(r.events, RP.from, RP.to, 120);
+  const peak = Math.max(1, ...bars);
+  $('rpDensity').setAttribute('viewBox', '0 0 120 20');
+  $('rpDensity').replaceChildren(...bars.map((n, i) => svg('rect', { x: i, width: 0.85, y: 20 - (n / peak) * 20, height: (n / peak) * 20 })));
+  rpSeek(RP.to, false);
+});
+
+function buildReplayGraph() {
+  const stage = $('replayStage');
+  const w = stage.clientWidth;
+  const ht = stage.clientHeight;
+  const n = RP.names.length;
+  if (!w || !ht || !n) { $('replayGraph').replaceChildren(); return; }
+  RP.hub = { x: Math.round(w / 2), y: Math.round(ht / 2) };
+  const compact = w < 640;
+  const rx = Math.max(70, Math.min(w / 2 - (compact ? 110 : 210), 330));
+  const ry = Math.max(70, Math.min(ht / 2 - 90, 200, rx * 1.2));
+  RP.pos.clear(); RP.nodes.clear();
+  const links = [];
+  const nodes = [];
+  RP.names.forEach((name, i) => {
+    const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+    const p = { x: Math.round(RP.hub.x + Math.cos(a) * rx), y: Math.round(RP.hub.y + Math.sin(a) * ry) };
+    RP.pos.set(name, p);
+    links.push(svg('line', { class: 'g-link', x1: p.x, y1: p.y, x2: RP.hub.x, y2: RP.hub.y }));
+    const side = Math.abs(Math.cos(a)) > 0.4 ? (Math.cos(a) > 0 ? 'right' : 'left') : Math.sin(a) > 0 ? 'bottom' : 'top';
+    const anchor = side === 'right' ? 'start' : side === 'left' ? 'end' : 'middle';
+    const t = { side, nm: svg('text', { class: 'nm', 'text-anchor': anchor }, cut(name, 24)), what: svg('text', { class: 'what', 'text-anchor': anchor }), now: svg('text', { class: 'now', 'text-anchor': anchor }) };
+    t.g = svg('g', { transform: `translate(${p.x},${p.y})` }, svg('circle', { class: 'mark', r: 6 }), t.nm, t.what, t.now);
+    RP.nodes.set(name, t);
+    nodes.push(t.g);
+  });
+  const hubG = svg('g', { class: 'g-hub', transform: `translate(${RP.hub.x},${RP.hub.y})` }, svg('rect', { x: -50, y: -22, width: 100, height: 44, rx: 4 }), svg('text', { class: 'nm', y: 4 }, 'Memory'));
+  RP.layer = svg('g', {});
+  $('replayGraph').setAttribute('viewBox', `0 0 ${w} ${ht}`);
+  $('replayGraph').replaceChildren(...links, RP.layer, hubG, ...nodes);
+}
+
+function rpUpdate(t, from) {
+  $('rpSlider').value = String(rpValue(t));
+  setText($('rpTime'), `${rpClock(t)}${Date.now() - t > 2000 ? ` · ${left(Date.now() - t)} ago` : ' · now'}`);
+  for (const [name, nd] of RP.nodes) {
+    const s = stateAt(RP.events, t, name);
+    setAttr(nd.g, 'class', `g-node ${s.state}`);
+    const lines = [[nd.nm, null]];
+    if (s.state === 'working' || s.state === 'waiting') {
+      if (s.status) lines.push([nd.what, cut(s.status, 36)]);
+      lines.push([nd.now, cut(s.activity || s.state, 30)]);
+    } else lines.push([nd.now, STATE[s.state === 'idle' ? 'idle' : 'stopped']]);
+    for (const el of [nd.what, nd.now]) if (!lines.some(([used]) => used === el)) setText(el, '');
+    lines.forEach(([el, text], i) => {
+      let x = 0; let y;
+      if (nd.side === 'right' || nd.side === 'left') { x = nd.side === 'right' ? 16 : -16; y = (i - (lines.length - 1) / 2) * 17 + 4; } else if (nd.side === 'bottom') y = 27 + i * 17; else y = -17 - (lines.length - 1 - i) * 17;
+      if (text !== null) setText(el, text);
+      setAttr(el, 'x', x); setAttr(el, 'y', y);
+    });
+  }
+  // the feed: the last events up to this moment
+  let hi = 0;
+  while (hi < RP.events.length && RP.events[hi].ts <= t) hi++;
+  if (hi !== RP.shown) {
+    $('replayFeed').replaceChildren(...RP.events.slice(Math.max(0, hi - 40), hi).map(feedItem));
+    $('replayFeed').scrollTop = $('replayFeed').scrollHeight;
+    RP.shown = hi;
+  }
+  if (from !== false && !calm) for (const e of RP.events.filter((x) => x.ts > from && x.ts <= t).slice(-8)) rpAnimate(e);
+}
+
+function rpAnimate(e) {
+  const me = RP.pos.get(e.agent);
+  if (e.type === 'memory' && me) return e.op === 'write' ? fly(me, RP.hub, false, RP.layer) : fly(RP.hub, me, false, RP.layer);
+  if ((e.type === 'notify' || e.type === 'waiting') && me) return ping(me, 'warn', RP.layer);
+  if (e.type !== 'message') return;
+  const targets = e.to === 'all' ? RP.names.filter((n) => n !== e.agent).map((n) => RP.pos.get(n)) : [RP.pos.get(e.to)];
+  for (const to of targets.filter(Boolean)) { if (me) fly(me, to, true, RP.layer); else ping(to, '', RP.layer); }
+}
+
+function rpSeek(t, animate = true) {
+  const before = RP.t;
+  RP.t = Math.min(RP.to, Math.max(RP.from, t));
+  rpUpdate(RP.t, animate && RP.t > before ? before : false);
+}
+
+function rpPause() {
+  RP.playing = false;
+  cancelAnimationFrame(RP.raf);
+  setText($('rpPlay'), 'Play');
+}
+
+function rpTick(now) {
+  if (!RP.playing) return;
+  const speed = Number($('rpSpeed').value);
+  const dt = Math.min(100, now - RP.last); // a hidden tab must not jump ahead
+  RP.last = now;
+  let t = RP.t + dt * speed;
+  const next = nextEventAfter(RP.events, RP.t);
+  if (next && next - t > 8000 && next - RP.t > 8000) t = next - 600; // skip a quiet stretch
+  rpSeek(t);
+  if (RP.t >= RP.to) return rpPause();
+  RP.raf = requestAnimationFrame(rpTick);
+}
+
+function rpPlay() {
+  if (!RP.events.length) return;
+  if (RP.t >= RP.to) rpSeek(RP.from, false);
+  RP.playing = true;
+  RP.last = performance.now();
+  setText($('rpPlay'), 'Pause');
+  RP.raf = requestAnimationFrame(rpTick);
+}
+
 // ---------- wiring ----------
 
 $('nav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
@@ -1512,6 +1651,12 @@ $('selStop').addEventListener('click', stopPicked);
 $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('mapBtn').addEventListener('click', () => setView('map'));
+$('rpPlay').addEventListener('click', () => (RP.playing ? rpPause() : rpPlay()));
+$('rpLive').addEventListener('click', () => { rpPause(); rpSeek(RP.to, false); });
+$('rpSlider').addEventListener('input', () => { rpPause(); RP.shown = -1; rpSeek(rpAt(Number($('rpSlider').value)), false); });
+$('replayRange').addEventListener('change', loadReplay);
+$('rpTools').addEventListener('change', (ev) => $('replayFeed').classList.toggle('hide-tools', !ev.target.checked));
+new ResizeObserver(() => { if (S.view === 'replay' && RP.names.length) { buildReplayGraph(); rpUpdate(RP.t, false); } }).observe($('replayStage'));
 $('authSwitch').addEventListener('click', () => showAuth(authMode === 'login' ? 'signup' : 'login'));
 $('aPass').addEventListener('input', pwHint);
 for (const id of ['aFirst', 'aLast', 'aEmail', 'aPass']) $(id).addEventListener('input', () => authError('')); // an old error is no longer true once you type

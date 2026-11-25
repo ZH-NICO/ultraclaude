@@ -89,7 +89,24 @@ export class Project extends EventEmitter {
     }
     this.vault.ensure(this.dir);
     for (const a of this.state.agents) this.runtime.set(a.id, this.#freshRuntime());
+    this.eventsFile = path.join(this.dataDir, 'events.jsonl');
+    this.events = this.recorded({ limit: 300 });
     this.syncClaudeCode();
+  }
+
+  // ---------- the recording of everything that happened (for the replay) ----------
+
+  /** The recorded events, oldest first. The file is cut back to its newest 20000 lines when it has grown big. */
+  recorded({ since = 0, limit = 6000 } = {}) {
+    let lines;
+    try { lines = fs.readFileSync(this.eventsFile, 'utf8').split('\n').filter(Boolean); } catch { return []; }
+    if (lines.length > 30000) {
+      lines = lines.slice(-20000);
+      try { fs.writeFileSync(this.eventsFile, `${lines.join('\n')}\n`); } catch { /* go on with what we have */ }
+    }
+    const out = [];
+    for (const l of lines) { try { const e = JSON.parse(l); if (e.ts >= since) out.push(e); } catch { /* a half-written line */ } }
+    return out.slice(-limit);
   }
 
   // ---------- what Claude Code already has for this folder ----------
@@ -151,6 +168,7 @@ export class Project extends EventEmitter {
     const e = { id: crypto.randomUUID(), ts: Date.now(), type, agent, text: short(text, 400), ...extra };
     this.events.push(e);
     if (this.events.length > 300) this.events.shift();
+    try { fs.appendFileSync(this.eventsFile, `${JSON.stringify(e)}\n`); } catch { /* the replay just misses this one */ }
     this.emit('event', e);
     if (type !== 'tool') { try { this.vault.log(agent, extra.to ? `→ ${extra.to}: ${text}` : text); } catch { /* vault unavailable */ } }
     return e;

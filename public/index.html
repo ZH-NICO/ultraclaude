@@ -53,6 +53,7 @@
       <button type="button" data-view="overview" class="active">Overview</button>
       <button type="button" data-view="tasks">Tasks<span class="num" id="navTasks"></span></button>
       <button type="button" data-view="memory">Memory<span class="num" id="navNotes"></span></button>
+      <button type="button" data-view="replay">Replay</button>
     </nav>
 
     <div class="side-scroll">
@@ -122,6 +123,44 @@
             <button class="btn">Send</button>
           </form>
         </aside>
+      </div>
+    </section>
+
+    <section id="view-replay" class="view" hidden>
+      <header class="view-head">
+        <h1>Replay</h1>
+        <p class="sub" id="replaySub"></p>
+        <div class="head-actions">
+          <label class="check"><input type="checkbox" id="rpTools">Tool calls</label>
+          <select id="replayRange" aria-label="How far back">
+            <option value="3600000">Last hour</option>
+            <option value="21600000">Last 6 hours</option>
+            <option value="86400000" selected>Last 24 hours</option>
+            <option value="0">Everything recorded</option>
+          </select>
+        </div>
+      </header>
+      <div class="replay">
+        <div class="stage" id="replayStage">
+          <svg id="replayGraph" role="img" aria-label="The team as it was at the chosen moment"></svg>
+          <p class="map-empty" id="replayEmpty" hidden>Nothing recorded in this period yet. Once your agents start working, everything they do is kept here.</p>
+        </div>
+        <aside class="feed">
+          <header><h2>What happened</h2></header>
+          <ol id="replayFeed" class="hide-tools"></ol>
+        </aside>
+      </div>
+      <div class="transport">
+        <button type="button" class="btn primary" id="rpPlay">Play</button>
+        <select id="rpSpeed" aria-label="Speed">
+          <option value="1">1×</option><option value="10" selected>10×</option><option value="60">60×</option><option value="300">300×</option>
+        </select>
+        <div class="timeline">
+          <svg id="rpDensity" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <input type="range" id="rpSlider" min="0" max="1000" value="1000" aria-label="Moment in time">
+        </div>
+        <span class="mono" id="rpTime"></span>
+        <button type="button" class="btn" id="rpLive">Now</button>
       </div>
     </section>
 

@@ -93,9 +93,17 @@ export class Accounts {
   #save() {
     clearTimeout(this.timer);
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const text = JSON.stringify(this.data);
     const tmp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.writeFileSync(tmp, text, { mode: 0o600 });
+      fs.renameSync(tmp, this.file); // all or nothing
+    } catch {
+      // Windows refuses the rename while a virus scanner or another program holds the file for a moment.
+      // Writing in place is not atomic, but it is better than losing the change.
+      fs.writeFileSync(this.file, text, { mode: 0o600 });
+      fs.rmSync(tmp, { force: true });
+    }
   }
 
   #saveLater() { clearTimeout(this.timer); this.timer = setTimeout(() => this.#save(), 5000); this.timer.unref?.(); }

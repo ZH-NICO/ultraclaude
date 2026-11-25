@@ -512,3 +512,33 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 .auth-guest .or { display: flex; align-items: center; gap: 12px; color: var(--fg-3); font-size: 12px; }
 .auth-guest .or::before, .auth-guest .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .who .col b { font-weight: 600; }
+
+
+/* ---------- replay ---------- */
+.replay { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 340px; min-height: 0; }
+#replayGraph { position: absolute; inset: 0; width: 100%; height: 100%; }
+#replayStage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+#replayFeed { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0 0 10px; list-style: none; }
+#replayFeed li { display: grid; grid-template-columns: 40px minmax(0, 1fr); padding: 3px 16px; overflow-wrap: anywhere; }
+#replayFeed time { font: 11px/19.5px var(--mono); color: var(--fg-3); font-variant-numeric: tabular-nums; }
+#replayFeed b { font-weight: 600; }
+#replayFeed p { color: var(--fg-2); }
+#replayFeed .ev-tool { color: var(--fg-3); font-size: 12px; }
+#replayFeed.hide-tools .ev-tool { display: none; }
+#replayFeed .ev-waiting b:first-child, #replayFeed .ev-notify b:first-child { color: var(--waiting); }
+#replayFeed .ev-error b:first-child { color: var(--error); }
+.transport { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.transport .btn.primary { min-width: 64px; }
+.transport select { height: 28px; }
+.timeline { position: relative; flex: 1; min-width: 0; height: 34px; }
+.timeline svg { position: absolute; inset: 0 0 12px 0; width: 100%; height: calc(100% - 12px); }
+.timeline svg rect { fill: var(--fg-3); }
+.timeline input[type=range] { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 14px; margin: 0; padding: 0; background: none; border: 0; accent-color: var(--fg); }
+#rpTime { min-width: 190px; text-align: right; font-size: 12px; color: var(--fg-2); }
+.head-actions select { height: 28px; }
+@media (max-width: 760px) {
+  .replay { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(240px, 1fr) minmax(140px, 36%); }
+  .transport { flex-wrap: wrap; padding: 10px 14px; }
+  .timeline { flex-basis: 100%; order: 5; }
+  #rpTime { min-width: 0; margin-left: auto; }
+}
