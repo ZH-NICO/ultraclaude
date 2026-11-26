@@ -759,7 +759,7 @@ function renderTasks() {
           h('div', { class: 't' }, h('span', { class: 'id' }, `#${t.id}`), t.title),
           t.description ? h('div', { class: 'd' }, t.description) : null,
           h('footer', {}, assign, move, h('button', { type: 'button', class: 'link', onclick: guard(() => api('DELETE', `/api/tasks/${t.id}`)) }, 'Delete')));
-      }) : h('p', { class: 'none' }, status === 'todo' ? 'Nothing open.' : '—')));
+      }) : h('p', { class: 'none' }, { todo: 'Nothing open. Add a task above, or let your agents create them.', in_progress: 'Nothing in progress. Drag a task here when someone works on it.', done: 'Nothing done yet.' }[status])));
     col.addEventListener('dragover', (ev) => { ev.preventDefault(); col.classList.add('over'); });
     col.addEventListener('dragleave', (ev) => { if (!col.contains(ev.relatedTarget)) col.classList.remove('over'); });
     col.addEventListener('drop', guard(async (ev) => {
@@ -1774,6 +1774,7 @@ const wtName = (w) => (w.main ? 'Main folder' : w.agent || w.branch || w.path.sp
 
 const loadChanges = guard(async () => {
   CH.data = await api('GET', '/api/changes');
+  document.querySelector('.changes').classList.toggle('solo', !CH.data.repo); // without git there is no list to show
   if (!CH.data.repo) {
     setText($('changesSub'), 'not a git repository');
     $('wtList').replaceChildren();
@@ -1835,7 +1836,12 @@ function renderMissions(list) {
   const running = all.filter((m) => m.status === 'running').length;
   setText($('navMissions'), running ? String(running) : '');
   setText($('missionsSub'), all.length ? `${running} running · ${all.length - running} finished or stopped` : 'none yet');
-  $('missionList').replaceChildren(...all.map(missionCard));
+  $('missionList').replaceChildren(...(all.length ? all.map(missionCard) : [h('div', { class: 'empty-state' },
+    h('h3', {}, 'No missions yet'),
+    h('ol', { class: 'steps' },
+      h('li', {}, h('b', {}, '1'), 'Describe what you want done'),
+      h('li', {}, h('b', {}, '2'), 'A coordinator plans it and starts helpers'),
+      h('li', {}, h('b', {}, '3'), 'Follow it here until it reports back')))]));
 }
 
 function missionCard(m) {
