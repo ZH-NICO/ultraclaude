@@ -99,6 +99,10 @@ Click **ultraclaude** at the top left. Your drive sits in the middle, every fold
   <sub>Shown on a made-up drive.</sub>
 </p>
 
+## Subagents
+
+When an agent starts a subagent (Claude Code's Agent tool), it appears in the Overview as a small node hanging off that agent, not off the memory. It grows out of its agent, shows what it is doing while data flows along its link, and when it finishes its result travels back and it folds away. Background subagents stay until they report back.
+
 ## Missions
 
 Give the team one goal under **Missions** and say how many helpers it may use (1 to 6). A coordinator agent plans the goal into tasks on the board, starts helpers with the roles it needs, follows their work and reports back. Each mission is a card with the steps **Plan → Work → Check → Done**, the share of its tasks that are done, the open ones, and the coordinator's final report. **Stop** stops the coordinator and every helper it started. Only the coordinator of a running mission can start agents, and never more than its budget.

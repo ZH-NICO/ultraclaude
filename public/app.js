@@ -488,6 +488,7 @@ function syncGraph() {
   const sig = `${w}x${ht}:${S.agents.map((a) => a.id).join()}`;
   if (sig !== graphSig) { buildGraph(w, ht); graphSig = sig; }
   for (const a of S.agents) updateNode(a);
+  syncSubs();
   setText(hubCount, plural(S.noteCount, 'note'));
 }
 
@@ -499,6 +500,8 @@ function buildGraph(w, ht) {
   const ry = Math.max(70, Math.min(ht / 2 - 90, 200, rx * 1.2)); // never much taller than wide
   pos.clear();
   gnodes.clear();
+  subNodes.clear();
+  subsQuiet = true;
   const links = [];
   const nodes = [];
   S.agents.forEach((a, i) => {
@@ -525,7 +528,7 @@ function buildGraph(w, ht) {
   hubG.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setView('memory'); } });
   const g = $('graph');
   g.setAttribute('viewBox', `0 0 ${w} ${ht}`);
-  g.replaceChildren(...links, svg('g', { id: 'pulses' }), hubG, ...nodes);
+  g.replaceChildren(...links, svg('g', { id: 'subs' }), svg('g', { id: 'pulses' }), hubG, ...nodes);
 }
 
 function updateNode(a) {
@@ -575,6 +578,107 @@ function ping(at, cls = '', layer = $('pulses')) {
     { duration: 900, easing: 'ease-out' }).finished.then(() => ring.remove(), () => ring.remove());
 }
 
+// ---------- subagents in the overview ----------
+// A subagent hangs off the agent that started it (not off the memory): it grows out of the agent,
+// shows data flowing while it works, sends its result back and folds away when it is done.
+
+const subNodes = new Map(); // `${agentId}:${subId}` -> parts of its drawing
+let subsQuiet = false; // right after the graph is rebuilt, existing subagents appear without the opening animation
+const MAX_SUBS = 6;
+
+/**
+ * The spot for slot i beside an agent, alternating on both sides of it, so subagents cross neither its
+ * label nor its link to the memory. An agent above or below the memory has its label centred over or
+ * under it: there they go wide of the label and stack inwards.
+ */
+function subSpot(p, i, side) {
+  const dx = p.x - hub.x; const dy = p.y - hub.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ox = dx / len; const oy = dy / len; // away from the memory
+  const px = -oy; const py = ox; // across
+  const centred = side === 'top' || side === 'bottom';
+  const s = i % 2 ? -1 : 1;
+  const m = Math.floor(i / 2);
+  const d = centred ? 128 : 58 + m * 30;
+  const along = centred ? -(16 + m * 30) : 12;
+  const across = px * s;
+  return {
+    x: Math.round(p.x + px * s * d + ox * along), y: Math.round(p.y + py * s * d + oy * along),
+    labelSide: Math.abs(across) > 0.5 ? (across > 0 ? 'right' : 'left') : side === 'left' ? 'left' : 'right',
+  };
+}
+
+function syncSubs() {
+  const layer = $('subs');
+  if (!layer) return;
+  const want = new Map();
+  for (const a of S.agents) {
+    const p = pos.get(a.id);
+    const nd = gnodes.get(a.id);
+    if (!p || !nd) continue;
+    // every subagent keeps its slot while it lives, so the others do not jump when one closes; new ones take the first free slot
+    const list = (a.subs || []).slice(0, MAX_SUBS);
+    const taken = new Set(list.map((s) => subNodes.get(`${a.id}:${s.id}`)?.slot).filter((x) => x !== undefined));
+    for (const s of list) {
+      const key = `${a.id}:${s.id}`;
+      let slot = subNodes.get(key)?.slot;
+      if (slot === undefined) { slot = 0; while (taken.has(slot)) slot++; taken.add(slot); }
+      want.set(key, { a, s, slot, from: p, at: subSpot(p, slot, nd.side) });
+    }
+  }
+  for (const [key, n] of subNodes) if (!want.has(key)) { subNodes.delete(key); closeSub(n); }
+  for (const [key, w] of want) {
+    let n = subNodes.get(key);
+    if (!n) { n = openSub(w, layer, !subsQuiet); n.slot = w.slot; subNodes.set(key, n); }
+    else if (n.at.x !== w.at.x || n.at.y !== w.at.y || n.at.labelSide !== w.at.labelSide) placeSub(n, w.at);
+    setText(n.what, cut(w.s.activity || 'starting', 28));
+    setText(n.title, `${w.s.label} · ${w.s.type} subagent of ${w.a.name}${w.s.activity ? `\n${w.s.activity}` : ''}\nrunning for ${left(Date.now() - w.s.startedAt)}`);
+  }
+  subsQuiet = false;
+}
+function placeSub(n, at) {
+  n.at = at;
+  setAttr(n.g, 'transform', `translate(${at.x},${at.y})`);
+  setAttr(n.line, 'x2', at.x);
+  setAttr(n.line, 'y2', at.y);
+  const right = at.labelSide === 'right';
+  for (const el of [n.nm, n.what]) { setAttr(el, 'x', right ? 10 : -10); setAttr(el, 'text-anchor', right ? 'start' : 'end'); }
+}
+
+function openSub({ a, s, from, at }, layer, animated) {
+  const line = svg('line', { class: 'g-sublink', x1: from.x, y1: from.y, x2: at.x, y2: at.y });
+  const n = { line, from, at, title: svg('title'), nm: svg('text', { class: 'snm', y: -1 }, cut(s.label, 26)), what: svg('text', { class: 'swhat', y: 12 }) };
+  n.inner = svg('g', { class: 'g-sub-in' }, svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'mark', r: 4 }), n.nm, n.what);
+  n.g = svg('g', { class: 'g-sub', tabindex: 0, role: 'button' }, n.title, n.inner);
+  n.g.addEventListener('click', () => openAgent(a.id));
+  n.g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openAgent(a.id); } });
+  layer.append(line, n.g);
+  placeSub(n, at);
+  if (animated && !calm && !document.hidden && S.view === 'overview') {
+    // the link grows out of the agent, a spark runs along it, then the subagent pops up
+    line.setAttribute('pathLength', '1');
+    line.animate([{ strokeDasharray: '1 1', strokeDashoffset: 1 }, { strokeDasharray: '1 1', strokeDashoffset: 0 }], { duration: 380, easing: 'ease-out' })
+      .finished.then(() => line.removeAttribute('pathLength'), () => line.removeAttribute('pathLength'));
+    ping(from, 'sub');
+    fly(from, at);
+    n.inner.animate([{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1.5)', opacity: 1, offset: 0.6 }, { transform: 'scale(1)', opacity: 1 }], { duration: 520, delay: 320, easing: 'ease-out', fill: 'backwards' });
+  }
+  return n;
+}
+
+function closeSub(n) {
+  const gone = () => { n.g.remove(); n.line.remove(); };
+  if (calm || document.hidden || S.view !== 'overview' || !n.g.isConnected) return gone();
+  // the result travels back to the agent, the subagent folds away and the link retracts into the agent
+  n.g.classList.add('closing');
+  fly(n.at, n.from);
+  n.inner.animate([{ transform: 'scale(1)', opacity: 1 }, { transform: 'scale(1.35)', opacity: 1, offset: 0.25 }, { transform: 'scale(0)', opacity: 0 }], { duration: 420, easing: 'ease-in', fill: 'forwards' });
+  n.line.setAttribute('pathLength', '1');
+  n.line.animate([{ strokeDasharray: '1 1', strokeDashoffset: 0 }, { strokeDasharray: '1 1', strokeDashoffset: 1 }], { duration: 420, delay: 260, easing: 'ease-in', fill: 'forwards' });
+  setTimeout(() => ping(n.from, 'done'), 650);
+  setTimeout(gone, 760);
+}
+
 /** Shows an event in the graph: memory access runs along the spoke, messages between the two agents. */
 function animate(e) {
   if (S.view !== 'overview' || calm || document.hidden) return;

@@ -12,7 +12,8 @@ import { roleById, roleName, buildPrompt } from './roles.js';
 import { missionOf } from './missions.js';
 
 const HOOK_SCRIPT = fileURLToPath(new URL('./hook.js', import.meta.url)).replace(/\\/g, '/');
-const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop'];
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop', 'SubagentStop'];
+const SUBAGENT_TOOLS = ['Agent', 'Task'];
 const BUFFER_MAX = 400_000;
 const TASK_STATES = ['todo', 'in_progress', 'done'];
 const TASK_LABEL = { todo: 'open', in_progress: 'in progress', done: 'done' };
@@ -128,7 +129,7 @@ export class Project extends EventEmitter {
   // ---------- state helpers ----------
 
   #freshRuntime() {
-    return { state: 'stopped', activity: '', statusText: '', toolCount: 0, lastActive: 0, pty: null, buffer: '', pendingPrompt: '', startedAt: 0 };
+    return { state: 'stopped', activity: '', statusText: '', toolCount: 0, lastActive: 0, pty: null, buffer: '', pendingPrompt: '', startedAt: 0, subs: [] };
   }
 
   save() {
@@ -152,6 +153,7 @@ export class Project extends EventEmitter {
       id: a.id, name: a.name, roleId: a.roleId, roleName: roleName(a), sessionId: a.sessionId,
       model: a.model, permissionMode: a.permissionMode, worktree: a.worktree,
       state: r.state, activity: r.activity, statusText: r.statusText, toolCount: r.toolCount, lastActive: r.lastActive,
+      subs: r.subs.map(({ id, label, type, activity, startedAt }) => ({ id, label, type, activity, startedAt })),
       unread: this.state.messages.filter((m) => m.to === a.id && !m.delivered).length,
     };
   }
@@ -269,7 +271,7 @@ export class Project extends EventEmitter {
       // Claude Code quits at once when it cannot find the session it was asked to resume.
       const resumeFailed = resumed && !r.reported && !r.stopping && Date.now() - r.startedAt < 5000;
       r.pty = null;
-      Object.assign(r, { state: 'stopped', activity: '' });
+      Object.assign(r, { state: 'stopped', activity: '', subs: [] });
       if (resumeFailed) {
         a.started = false;
         a.imported = false;
@@ -505,6 +507,29 @@ export class Project extends EventEmitter {
       Object.assign(r, { state: 'working', activity: 'thinking' });
       if (!a.started) { a.started = true; this.save(); }
       out = context([this.teamSnapshot(id), this.takeUnread(id)].filter(Boolean).join('\n\n'));
+    } else if (ev === 'PreToolUse' && p.agent_id) {
+      // a tool call made inside one of the agent's subagents: it belongs to that subagent
+      r.toolCount++;
+      const sub = r.subs.find((s) => s.agentId === p.agent_id) || r.subs.find((s) => !s.agentId);
+      if (sub) { sub.agentId ||= p.agent_id; sub.activity = describeTool(p.tool_name, p.tool_input); }
+      this.event('tool', a.name, `↳ ${sub ? `${sub.label}: ` : ''}${describeTool(p.tool_name, p.tool_input)}`);
+    } else if (ev === 'PreToolUse' && SUBAGENT_TOOLS.includes(p.tool_name)) {
+      r.toolCount++;
+      const input = p.tool_input || {};
+      const type = String(input.subagent_type || 'general-purpose');
+      const sub = { id: String(p.tool_use_id || crypto.randomUUID()), type, label: short(input.description || type, 40), activity: '', bg: !!input.run_in_background, startedAt: Date.now(), agentId: '' };
+      r.subs.push(sub);
+      Object.assign(r, { state: 'working', activity: describeTool(p.tool_name, input) });
+      this.event('subagent', a.name, `started a subagent: ${sub.label}`, { sub: sub.id, op: 'start' });
+    } else if (ev === 'PostToolUse' && SUBAGENT_TOOLS.includes(p.tool_name) && !p.agent_id) {
+      // the Agent tool returns when its subagent is done, unless it runs in the background
+      const sub = r.subs.find((s) => s.id === String(p.tool_use_id));
+      if (sub && !sub.bg) this.#endSub(a, r, sub);
+      r.state = 'working';
+      out = context(this.takeUnread(id));
+    } else if (ev === 'SubagentStop') {
+      const sub = r.subs.find((s) => p.agent_id && s.agentId === p.agent_id) || r.subs.find((s) => s.bg) || r.subs[0];
+      if (sub) this.#endSub(a, r, sub);
     } else if (ev === 'PreToolUse') {
       r.toolCount++;
       Object.assign(r, { state: 'working', activity: describeTool(p.tool_name, p.tool_input) });
@@ -523,10 +548,16 @@ export class Project extends EventEmitter {
         out = { decision: 'block', reason: `New messages from your team arrived while you were working:\n${unread}` };
       } else {
         Object.assign(r, { state: 'idle', activity: '' });
+        for (const s of r.subs.filter((x) => !x.bg)) this.#endSub(a, r, s); // a turn that ended cannot still wait for one
       }
     }
     this.#changed(a);
     return out;
+  }
+
+  #endSub(a, r, sub) {
+    r.subs = r.subs.filter((s) => s !== sub);
+    this.event('subagent', a.name, `finished its subagent: ${sub.label}`, { sub: sub.id, op: 'end' });
   }
 
   setStatus(id, text) {
