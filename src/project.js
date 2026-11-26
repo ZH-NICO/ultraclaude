@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { Vault, KNOWLEDGE } from './vault.js';
 import { listSessions, claudeMemoryFiles, claudeSetting } from './history.js';
 import { roleById, roleName, buildPrompt } from './roles.js';
+import { missionOf } from './missions.js';
 
 const HOOK_SCRIPT = fileURLToPath(new URL('./hook.js', import.meta.url)).replace(/\\/g, '/');
 const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Notification', 'Stop'];
@@ -79,7 +80,7 @@ export class Project extends EventEmitter {
     this.runtime = new Map(); // agentId -> { state, activity, pty, buffer, ... }
     this.events = [];
     this.endpoint = null; // { port, token } once the server listens
-    this.state = { agents: [], tasks: [], messages: [], nextTaskId: 1 };
+    this.state = { agents: [], tasks: [], messages: [], missions: [], nextTaskId: 1 };
 
     fs.mkdirSync(this.dataDir, { recursive: true });
     const ignore = path.join(this.dataDir, '.gitignore');
@@ -400,6 +401,7 @@ export class Project extends EventEmitter {
   #tasksChanged() {
     this.save();
     this.emit('tasks', this.state.tasks);
+    this.emit('missionTasks');
     try { this.vault.writeBoard(this.state.tasks); } catch { /* vault unavailable */ }
   }
 
@@ -408,6 +410,8 @@ export class Project extends EventEmitter {
     const who = assignee ? this.agent(assignee) : null;
     if (assignee && !who) throw new Error(`No agent named "${assignee}".`);
     const t = { id: this.state.nextTaskId++, title: short(title, 200), description: String(description).trim(), status: 'todo', assignee: who?.name || '', createdBy: by, createdAt: Date.now(), updatedAt: Date.now() };
+    const mission = missionOf(this, by) || missionOf(this, who?.name); // work of a mission team counts for its progress
+    if (mission) t.mission = mission.id;
     this.state.tasks.push(t);
     this.event('task', by, `created task #${t.id}: ${t.title}${t.assignee ? ` (for ${t.assignee})` : ''}`);
     this.#tasksChanged();

@@ -1,5 +1,6 @@
 // Minimal MCP server (Streamable HTTP, JSON responses) that gives every agent the team tools.
 import { KNOWLEDGE } from './vault.js';
+import { MISSION_TOOLS, toolsFor, callMissionTool } from './missions.js';
 
 const str = (description) => ({ type: 'string', description });
 
@@ -79,6 +80,7 @@ function callTool(project, agent, name, args = {}) {
       return `Updated: ${taskLine(project.updateTask(agent.name, args.id, patch))}`;
     }
     default:
+      if (MISSION_TOOLS.some((t) => t.name === name)) return callMissionTool(project, agent, name, args);
       throw new Error(`Unknown tool: ${name}`);
   }
 }
@@ -98,7 +100,7 @@ function handleOne(project, agent, msg) {
     case 'ping':
       return ok({});
     case 'tools/list':
-      return ok({ tools: TOOLS });
+      return ok({ tools: [...TOOLS, ...toolsFor(project, agent)] });
     case 'tools/call':
       try {
         return ok({ content: [{ type: 'text', text: String(callTool(project, agent, params?.name, params?.arguments ?? {})) }] });

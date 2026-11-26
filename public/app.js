@@ -4,7 +4,7 @@ const $ = (id) => document.getElementById(id);
 import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
 import { layout, degrees, dotSize, panZoom } from './graph.js';
 
-const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay', 'changes'];
+const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay', 'changes', 'missions'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1091,6 +1091,7 @@ function onEvent(e) {
   else if (e.type === 'notify') { toast(`${e.agent}: ${e.text}`, 'waiting', jump); notify(`Message from ${e.agent}`); }
   else if (e.type === 'error') toast(`${e.agent} ${e.text}`, 'error');
   else if (e.type === 'guard') { toast(`Cost guard: ${e.text}`, 'waiting'); notify('Cost guard'); }
+  else if (e.type === 'mission' && e.to === 'user') { toast(`${e.agent} ${e.text}`, 'waiting', () => setView('missions')); notify('Mission finished'); }
 }
 
 // Live updates that arrive while the state is being fetched are newer than the fetched state.
@@ -1110,6 +1111,7 @@ async function loadState() {
     : 'The UltraClaude server for this folder is older than this window. Run “ultraclaude” in this folder to update it.');
   renderSessions();
   renderGuard(st.guard);
+  renderMissions(st.missions || []);
   setText($('projectName'), S.project.name);
   $('projectName').title = S.project.dir;
   setText($('vaultPath'), S.project.vault);
@@ -1140,6 +1142,7 @@ function connect() {
     else if (m.t === 'event') onEvent(m.e);
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
     else if (m.t === 'guard') renderGuard(m.guard);
+    else if (m.t === 'missions') renderMissions(m.missions);
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
   ws.onclose = (ev) => {
@@ -1763,64 +1766,98 @@ function guardCard() {
     h('p', {}, h('button', { type: 'button', class: 'btn', onclick: save }, 'Save')));
 }
 
-// ---------- changes (git) ----------
-// What each agent changed: its worktree, the files and the diff, and the buttons to bring the work home.
-
-const CH = { data: null, sel: null };
-const wtName = (w) => (w.main ? 'Main folder' : w.agent || w.branch || w.path.split(/[\\/]/).pop());
-
-const loadChanges = guard(async () => {
-  CH.data = await api('GET', '/api/changes');
-  if (!CH.data.repo) {
-    setText($('changesSub'), 'not a git repository');
-    $('wtList').replaceChildren();
-    $('wtView').replaceChildren(h('div', { class: 'doc' }, h('h1', {}, 'No git here'), h('p', {}, 'This folder is not a git repository, so there are no changes to show. Run “git init” in it to track what your agents change. Agents started with “Own worktree” then work on their own branch, and their work shows up here to review, merge or open as a pull request.')));
-    return;
-  }
-  const list = CH.data.worktrees;
-  const busy = list.filter((w) => w.files.length || w.ahead).length;
-  setText($('changesSub'), `${plural(list.length - 1, 'agent worktree')} · ${busy ? `${busy} with changes` : 'nothing changed'}`);
-  setText($('navChanges'), busy ? String(busy) : '');
-  if (!list.some((w) => w.path === CH.sel)) CH.sel = (list.find((w) => !w.main && (w.files.length || w.ahead)) || list[0]).path;
-  $('wtList').replaceChildren(...list.map((w) => h('button', { type: 'button', class: `wt${w.path === CH.sel ? ' on' : ''}`, onclick: () => { CH.sel = w.path; loadChanges(); } },
-    h('b', {}, wtName(w)),
-    h('small', {}, w.main ? w.branch : w.branch),
-    h('span', { class: 'meta' }, [w.ahead ? plural(w.ahead, 'commit') : '', w.files.length ? plural(w.files.length, 'file') : 'no changes', w.dirty ? `${w.dirty} uncommitted` : ''].filter(Boolean).join(' · ')))));
-  await showWorktree(list.find((w) => w.path === CH.sel));
-});
-
-async function showWorktree(w) {
-  const { diff } = await api('GET', `/api/changes/diff?path=${encodeURIComponent(w.path)}`);
-  const msg = h('input', { placeholder: 'What changed', 'aria-label': 'Commit message', value: w.agent ? `Work by ${w.agent}` : '' });
-  const act = (label, fn, primary = false) => h('button', { type: 'button', class: `btn${primary ? ' primary' : ''}`, onclick: guard(fn) }, label);
-  const actions = [];
-  if (w.dirty) actions.push(msg, act('Commit all', async () => { await api('POST', '/api/changes/commit', { path: w.path, message: msg.value }); toast('Committed.'); loadChanges(); }));
-  if (!w.main && w.ahead) {
-    actions.push(act(`Merge into ${w.base}`, async () => { const r = await api('POST', '/api/changes/merge', { path: w.path }); toast(`Merged into ${r.into}.`); loadChanges(); }, !w.dirty));
-    actions.push(act('Open pull request', async () => { const r = await api('POST', '/api/changes/pr', { path: w.path }); toast('Pull request opened. Click to see it.', '', () => window.open(r.url, '_blank', 'noopener')); loadChanges(); }));
-  }
-  $('wtView').replaceChildren(
-    h('div', { class: 'wt-head' },
-      h('div', {}, h('h2', {}, wtName(w)), h('p', { class: 'fine' }, w.path, w.main ? '' : ` · branch ${w.branch}, ${w.ahead ? `${plural(w.ahead, 'commit')} ahead of ${w.base}` : `nothing committed beyond ${w.base}`}`)),
-      actions.length ? h('div', { class: 'wt-actions' }, ...actions) : null),
-    w.files.length ? h('ul', { class: 'wt-files' }, ...w.files.map((f) => h('li', { class: f.status }, h('span', { class: 'st' }, f.status), h('code', {}, f.path), f.uncommitted ? h('small', {}, 'uncommitted') : null))) : h('p', { class: 'fine' }, w.main ? 'The main folder has no uncommitted changes.' : 'This worktree has no changes yet.'),
-    diff ? renderDiff(diff) : null);
-}
-
-/** A unified diff, one line per row, coloured by what happened to it. */
-function renderDiff(text) {
-  const pre = h('pre', { class: 'diff' });
-  const rows = text.split('\n').slice(0, 8000).map((line) => {
-    const cls = line.startsWith('diff --git') ? 'file' : line.startsWith('@@') ? 'hunk' : /^(\+\+\+|---|index |new file|deleted file|similarity|rename )/.test(line) ? 'meta' : line[0] === '+' ? 'add' : line[0] === '-' ? 'del' : '';
-    const el = document.createElement('span');
-    if (cls) el.className = cls;
-    el.textContent = `${line}\n`;
-    return el;
-  });
-  pre.append(...rows);
-  return pre;
-}
-
+// ---------- changes (git) ----------
+// What each agent changed: its worktree, the files and the diff, and the buttons to bring the work home.
+
+const CH = { data: null, sel: null };
+const wtName = (w) => (w.main ? 'Main folder' : w.agent || w.branch || w.path.split(/[\\/]/).pop());
+
+const loadChanges = guard(async () => {
+  CH.data = await api('GET', '/api/changes');
+  if (!CH.data.repo) {
+    setText($('changesSub'), 'not a git repository');
+    $('wtList').replaceChildren();
+    $('wtView').replaceChildren(h('div', { class: 'doc' }, h('h1', {}, 'No git here'), h('p', {}, 'This folder is not a git repository, so there are no changes to show. Run “git init” in it to track what your agents change. Agents started with “Own worktree” then work on their own branch, and their work shows up here to review, merge or open as a pull request.')));
+    return;
+  }
+  const list = CH.data.worktrees;
+  const busy = list.filter((w) => w.files.length || w.ahead).length;
+  setText($('changesSub'), `${plural(list.length - 1, 'agent worktree')} · ${busy ? `${busy} with changes` : 'nothing changed'}`);
+  setText($('navChanges'), busy ? String(busy) : '');
+  if (!list.some((w) => w.path === CH.sel)) CH.sel = (list.find((w) => !w.main && (w.files.length || w.ahead)) || list[0]).path;
+  $('wtList').replaceChildren(...list.map((w) => h('button', { type: 'button', class: `wt${w.path === CH.sel ? ' on' : ''}`, onclick: () => { CH.sel = w.path; loadChanges(); } },
+    h('b', {}, wtName(w)),
+    h('small', {}, w.main ? w.branch : w.branch),
+    h('span', { class: 'meta' }, [w.ahead ? plural(w.ahead, 'commit') : '', w.files.length ? plural(w.files.length, 'file') : 'no changes', w.dirty ? `${w.dirty} uncommitted` : ''].filter(Boolean).join(' · ')))));
+  await showWorktree(list.find((w) => w.path === CH.sel));
+});
+
+async function showWorktree(w) {
+  const { diff } = await api('GET', `/api/changes/diff?path=${encodeURIComponent(w.path)}`);
+  const msg = h('input', { placeholder: 'What changed', 'aria-label': 'Commit message', value: w.agent ? `Work by ${w.agent}` : '' });
+  const act = (label, fn, primary = false) => h('button', { type: 'button', class: `btn${primary ? ' primary' : ''}`, onclick: guard(fn) }, label);
+  const actions = [];
+  if (w.dirty) actions.push(msg, act('Commit all', async () => { await api('POST', '/api/changes/commit', { path: w.path, message: msg.value }); toast('Committed.'); loadChanges(); }));
+  if (!w.main && w.ahead) {
+    actions.push(act(`Merge into ${w.base}`, async () => { const r = await api('POST', '/api/changes/merge', { path: w.path }); toast(`Merged into ${r.into}.`); loadChanges(); }, !w.dirty));
+    actions.push(act('Open pull request', async () => { const r = await api('POST', '/api/changes/pr', { path: w.path }); toast('Pull request opened. Click to see it.', '', () => window.open(r.url, '_blank', 'noopener')); loadChanges(); }));
+  }
+  $('wtView').replaceChildren(
+    h('div', { class: 'wt-head' },
+      h('div', {}, h('h2', {}, wtName(w)), h('p', { class: 'fine' }, w.path, w.main ? '' : ` · branch ${w.branch}, ${w.ahead ? `${plural(w.ahead, 'commit')} ahead of ${w.base}` : `nothing committed beyond ${w.base}`}`)),
+      actions.length ? h('div', { class: 'wt-actions' }, ...actions) : null),
+    w.files.length ? h('ul', { class: 'wt-files' }, ...w.files.map((f) => h('li', { class: f.status }, h('span', { class: 'st' }, f.status), h('code', {}, f.path), f.uncommitted ? h('small', {}, 'uncommitted') : null))) : h('p', { class: 'fine' }, w.main ? 'The main folder has no uncommitted changes.' : 'This worktree has no changes yet.'),
+    diff ? renderDiff(diff) : null);
+}
+
+/** A unified diff, one line per row, coloured by what happened to it. */
+function renderDiff(text) {
+  const pre = h('pre', { class: 'diff' });
+  const rows = text.split('\n').slice(0, 8000).map((line) => {
+    const cls = line.startsWith('diff --git') ? 'file' : line.startsWith('@@') ? 'hunk' : /^(\+\+\+|---|index |new file|deleted file|similarity|rename )/.test(line) ? 'meta' : line[0] === '+' ? 'add' : line[0] === '-' ? 'del' : '';
+    const el = document.createElement('span');
+    if (cls) el.className = cls;
+    el.textContent = `${line}\n`;
+    return el;
+  });
+  pre.append(...rows);
+  return pre;
+}
+
+// ---------- missions ----------
+// One goal, a coordinator that plans and staffs it, and a pipeline that shows where it stands.
+
+const STAGE_LABEL = { plan: 'Plan', work: 'Work', check: 'Check', done: 'Done' };
+
+function renderMissions(list) {
+  if (list) S.missions = list;
+  const all = S.missions || [];
+  const running = all.filter((m) => m.status === 'running').length;
+  setText($('navMissions'), running ? String(running) : '');
+  setText($('missionsSub'), all.length ? `${running} running · ${all.length - running} finished or stopped` : 'none yet');
+  $('missionList').replaceChildren(...all.map(missionCard));
+}
+
+function missionCard(m) {
+  const at = m.stages.indexOf(m.stage);
+  const pct = m.tasks.total ? Math.round((m.tasks.done / m.tasks.total) * 100) : 0;
+  const lead = agentBy(m.coordinator);
+  return h('article', { class: `mission ${m.status}` },
+    h('div', { class: 'm-head' },
+      h('h3', {}, m.goal),
+      h('div', { class: 'm-actions' },
+        lead ? h('button', { type: 'button', class: 'btn', onclick: () => openAgent(lead.id) }, 'Open coordinator') : null,
+        m.status === 'running' ? h('button', { type: 'button', class: 'btn', onclick: guard(async () => { await api('POST', `/api/missions/${m.id}/stop`); }) }, 'Stop') : null)),
+    h('p', { class: 'fine' }, [`${m.coordinator || 'Coordinator'} coordinates`, m.helpers.length ? `helpers: ${m.helpers.join(', ')}` : `no helpers yet (up to ${m.budget})`, `started ${hhmm(m.createdAt)}`].join(' · ')),
+    h('ol', { class: 'pipeline', 'aria-label': 'Progress' }, m.stages.map((s, i) => h('li', { class: m.stage === 'stopped' ? '' : i < at ? 'past' : i === at ? 'on' : '' }, STAGE_LABEL[s]))),
+    m.stage === 'stopped' ? h('p', { class: 'm-stopped' }, `Stopped ${m.endedAt ? hhmm(m.endedAt) : ''}`) : null,
+    m.tasks.total ? h('div', { class: 'm-progress' },
+      h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'Tasks done' }, h('i', { style: `width:${pct}%` })),
+      h('span', {}, `${m.tasks.done} of ${plural(m.tasks.total, 'task')} done`)) : null,
+    m.tasks.open.length && m.status === 'running' ? h('ul', { class: 'm-tasks' }, ...m.tasks.open.slice(0, 6).map((t) => h('li', {}, h('span', { class: `st ${t.status}` }, t.status === 'in_progress' ? 'in progress' : 'open'), `#${t.id} ${t.title}`, t.assignee ? h('small', {}, ` · ${t.assignee}`) : null))) : null,
+    m.summary ? h('div', { class: 'm-summary' }, h('b', {}, 'Report'), h('p', {}, m.summary)) : null);
+}
+
 // ---------- wiring ----------
 
 $('nav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-view]'); if (b) setView(b.dataset.view); });
@@ -1837,6 +1874,12 @@ $('selRemove').addEventListener('click', removePicked);
 $('selClear').addEventListener('click', () => { S.picked.clear(); syncSelBar(); });
 $('mapBtn').addEventListener('click', () => setView('map'));
 $('changesRefresh').addEventListener('click', () => loadChanges());
+$('missionForm').addEventListener('submit', guard(async (ev) => {
+  ev.preventDefault();
+  await api('POST', '/api/missions', { goal: $('missionGoal').value, budget: Number($('missionBudget').value) });
+  $('missionGoal').value = '';
+  toast('Mission started. The coordinator is planning it.');
+}));
 $('guardResume').addEventListener('click', guard(async () => { renderGuard(await api('POST', '/api/guard/resume')); }));
 $('memMode').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-mode]'); if (b) setMemMode(b.dataset.mode); });
 G.pz = panZoom($('gStage'), (G.view = { x: 0, y: 0, k: 1 }), applyGraphView, { min: 0.15, max: 5 });

@@ -53,6 +53,7 @@
       <button type="button" data-view="overview" class="active">Overview</button>
       <button type="button" data-view="tasks">Tasks<span class="num" id="navTasks"></span></button>
       <button type="button" data-view="memory">Memory<span class="num" id="navNotes"></span></button>
+      <button type="button" data-view="missions">Missions<span class="num" id="navMissions"></span></button>
       <button type="button" data-view="replay">Replay</button>
       <button type="button" data-view="changes">Changes<span class="num" id="navChanges"></span></button>
     </nav>
@@ -131,6 +132,24 @@
       </div>
     </section>
 
+    <section id="view-missions" class="view" hidden>
+      <header class="view-head">
+        <h1>Missions</h1>
+        <p class="sub" id="missionsSub"></p>
+      </header>
+      <div class="missions">
+        <form class="mission-form" id="missionForm">
+          <label for="missionGoal">Goal</label>
+          <textarea id="missionGoal" rows="3" placeholder="What should the team get done? For example: add a dark mode toggle to the settings page, remember the choice, and test it."></textarea>
+          <div class="mission-row">
+            <label>Helpers, at most <input type="number" id="missionBudget" min="1" max="6" value="3"></label>
+            <button type="submit" class="btn primary">Start mission</button>
+          </div>
+          <p class="fine">A coordinator agent plans the goal into tasks on the board, starts up to this many helpers, follows their work and reports back here. Every agent uses your Claude Code quota, and the cost guard still applies.</p>
+        </form>
+        <div id="missionList"></div>
+      </div>
+    </section>
     <section id="view-changes" class="view" hidden>
       <header class="view-head">
         <h1>Changes</h1>

@@ -19,6 +19,7 @@ import { Accounts, AuthError } from './accounts.js';
 import { usageReport } from './usage.js';
 import { Guard } from './guard.js';
 import * as git from './git.js';
+import { missionViews, startMission, stopMission } from './missions.js';
 
 const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
@@ -115,6 +116,8 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   project.on('notes', () => broadcast({ t: 'notes', count: noteCount() }));
   project.on('pty', (id, d) => broadcast({ t: 'out', id, d }));
   project.on('sessions', () => broadcast({ t: 'sessions', sessions: project.sessions() }));
+  project.on('missions', (missions) => broadcast({ t: 'missions', missions }));
+  project.on('missionTasks', () => { if (project.state.missions?.length) broadcast({ t: 'missions', missions: missionViews(project) }); });
   // the cost guard lives next to the accounts, so tests with their own accounts file get their own guard
   const costGuard = new Guard({ file: path.join(path.dirname(usersFile), 'guard.json'), project, report: () => usageReport({ range: 'today', blockLimit: costGuard.config.limit }) });
   costGuard.on('change', (guard) => broadcast({ t: 'guard', guard }));
@@ -228,6 +231,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       if (route === 'POST /api/changes/pr') { const r = await git.pullRequest(project.dir, b.path); project.event('git', 'user', `opened a pull request: ${r.url}`); return send(res, 200, r); }
       return send(res, 404, { error: 'Not found' });
     }
+    if (route === 'POST /api/missions' || /^\/api\/missions\/[0-9a-f]+\/stop$/.test(url.pathname)) {
+      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
+      if (route === 'POST /api/missions') return send(res, 200, startMission(project, await readBody(req)));
+      return send(res, 200, stopMission(project, url.pathname.split('/')[3]));
+    }
     if (route === 'GET /api/guard') return send(res, 200, costGuard.view());
     if (route === 'PATCH /api/guard' || route === 'POST /api/guard/resume') {
       if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
@@ -268,7 +276,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         project: { name: project.name, dir: project.dir, vault: project.vault.root, inObsidian: knownToObsidian(project.vault.root) },
         roles: ROLES.map(({ prompt, ...r }) => r),
         agents: project.views(), tasks: project.state.tasks, events: project.events.slice(-150), notes: noteCount(), sessions: project.sessions(),
-        version, latest: codeVersion(), guard: costGuard.view(),
+        version, latest: codeVersion(), guard: costGuard.view(), missions: missionViews(project),
       });
     }
     if (route === 'POST /api/agents') return send(res, 200, project.createAgent(body));
