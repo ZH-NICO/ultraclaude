@@ -13,5 +13,5 @@ test('versions, check and install', async () => {
   const ran = [];
   await installUpdate({ exec: async (c) => ran.push(c) });
   assert.ok(ran.length >= 1);
-  await assert.rejects(installUpdate({ exec: async () => { throw new Error('EPERM'); } }), /EPERM.*npm install -g/);
+  await assert.rejects(installUpdate({ exec: async () => { throw new Error('EPERM'); } }), /EPERM.*install -g https:/);
 });

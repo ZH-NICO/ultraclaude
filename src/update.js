@@ -5,9 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const SOURCE = 'github:ZH-NICO/ultraclaude';
+// the archive, not "github:…": that needs git to be installed
+const SOURCE = 'https://github.com/ZH-NICO/ultraclaude/archive/refs/heads/main.tar.gz';
 const REMOTE = 'https://raw.githubusercontent.com/ZH-NICO/ultraclaude/main/package.json';
-export const MANUAL = `npm install -g ${SOURCE}`;
+// on Windows "npm.cmd": PowerShell refuses to run the npm.ps1 script by default
+export const MANUAL = `${process.platform === 'win32' ? 'npm.cmd' : 'npm'} install -g ${SOURCE}`;
 
 export const localVersion = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 
@@ -45,7 +47,7 @@ export async function installUpdate({ exec = run } = {}) {
   installing = true;
   try {
     if (fs.existsSync(path.join(ROOT, '.git'))) { await exec('git pull --ff-only'); await exec('npm install --no-audit --no-fund'); }
-    else await exec(MANUAL);
+    else await exec(`${MANUAL} --prefer-online`); // not a cached copy of the old archive
     return { ok: true };
   } catch (err) {
     throw new Error(`The update failed: ${err.message} — close UltraClaude and run “${MANUAL}” in a terminal.`);

@@ -37,30 +37,38 @@ UltraClaude opens as many Claude Code sessions as you want for the same project 
 
 ## Updating
 
-When a new version is out, UltraClaude shows **New update available** in the sidebar and under *Settings → About*. Press **Update now**, then **Restart now**. Installed before version 0.2.0? Run this once, then `ultraclaude` again in each project:
+When a new version is out, UltraClaude shows **New update available** in the sidebar and under *Settings → About*. Press **Update now**, then **Restart now**. Installed before version 0.2.0? Run this once, then `ultraclaude` (Windows PowerShell: `ultraclaude.cmd`) again in each project:
 
 ```bash
-npm install -g github:ZH-NICO/ultraclaude
+npm.cmd install -g https://github.com/ZH-NICO/ultraclaude/archive/refs/heads/main.tar.gz   # Windows
+npm install -g https://github.com/ZH-NICO/ultraclaude/archive/refs/heads/main.tar.gz       # macOS, Linux
 ```
 
 ## Quick start
 
 You need [Node.js](https://nodejs.org) 20 or newer and [Claude Code](https://claude.com/claude-code) (the `claude` command works in your terminal and you are signed in). Obsidian is optional, because the vault is a normal folder of Markdown files.
 
-```bash
-npm install -g github:ZH-NICO/ultraclaude
+**Windows** (PowerShell or cmd):
+
+```powershell
+npm.cmd install -g https://github.com/ZH-NICO/ultraclaude/archive/refs/heads/main.tar.gz
+cd C:\path\to\your\project
+ultraclaude.cmd
 ```
 
-Then, in any project folder:
+**macOS and Linux:**
 
 ```bash
-cd my-project
+npm install -g https://github.com/ZH-NICO/ultraclaude/archive/refs/heads/main.tar.gz
+cd ~/path/to/your/project
 ultraclaude
 ```
 
+> **"Running scripts is disabled on this system"** (`npm.ps1 cannot be loaded`, `PSSecurityException`)? That is Windows PowerShell blocking scripts, which npm and `ultraclaude` are. Type `npm.cmd` and `ultraclaude.cmd` as above, or use the *Command Prompt* instead of PowerShell. If you would rather type just `npm` and `ultraclaude`, you can allow local scripts for your user once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
 A window opens for that folder. Pick a role and your first agent starts. The first time Claude Code runs in a folder, it asks in the agent's terminal whether you trust the folder. Select "Yes" there.
 
-Run `ultraclaude` again after an update: it replaces the old server and your running agents continue their sessions.
+Run `ultraclaude` (or `ultraclaude.cmd`) again after an update: it replaces the old server and your running agents continue their sessions.
 
 <details>
 <summary>Install from a clone instead</summary>
