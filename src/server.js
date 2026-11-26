@@ -22,6 +22,7 @@ import * as git from './git.js';
 import { missionViews, startMission, stopMission } from './missions.js';
 import { FileIndex } from './fileindex.js';
 import { BrainChat } from './brainchat.js';
+import { checkUpdate, installUpdate } from './update.js';
 
 const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
@@ -225,6 +226,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const cli = equal(req.headers['x-uc-cli'], cliKey) && (route === 'POST /api/shutdown' || route === 'GET /api/state');
     const who = sessionOf(req);
     if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
+    if (route === 'GET /api/update') return send(res, 200, await checkUpdate({ fresh: url.searchParams.get('fresh') === '1' }));
+    if (route === 'POST /api/update') {
+      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
+      return send(res, 200, await installUpdate());
+    }
     if (route === 'GET /api/graph') return send(res, 200, project.vault.graph());
     if (url.pathname === '/api/changes' || url.pathname.startsWith('/api/changes/')) {
       // what the agents changed in git: worktrees, diffs, and bringing the work home

@@ -1205,6 +1205,7 @@ function connect() {
     $('conn').classList.add('on');
     setText($('connText'), 'connected');
     await loadState();
+    lookForUpdate();
   });
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
@@ -1566,10 +1567,40 @@ async function tabSecurity() {
   } catch (err) { sessionsBox.replaceChildren(h('div', {}, err.message)); }
 }
 
+// ---------- updates from GitHub ----------
+
+async function lookForUpdate(fresh = false) {
+  try { S.update = await api('GET', `/api/update${fresh ? '?fresh=1' : ''}`); } catch { return; } // an older server cannot say
+  $('newBar').hidden = !S.update.available;
+  if (S.update.available) setText($('newText'), `New update available: version ${S.update.latest} (you have ${S.update.current}).`);
+}
+
+const runUpdate = guard(async () => {
+  const buttons = [$('newBtn'), $('aboutUpdate')].filter(Boolean);
+  for (const b of buttons) { b.disabled = true; b.textContent = 'Installing…'; }
+  try {
+    await api('POST', '/api/update', {});
+    $('newBar').hidden = true;
+    toast('Update installed. Press “Restart now” to use it.');
+    await loadState(); // shows the restart bar
+  } finally { for (const b of buttons) { b.disabled = false; b.textContent = 'Update now'; } }
+});
+
+function updateBox() {
+  const u = S.update;
+  const text = !u ? 'Checking for updates…' : u.available ? `New update available: version ${u.latest}. You have ${u.current}.` : u.error ? `Version ${u.current}. Could not check for updates: ${u.error}` : `Version ${u.current} is up to date.`;
+  return h('div', { class: 'group', id: 'updateBox' }, h('h3', {}, 'Updates'), h('p', {}, text),
+    h('div', { class: 'formrow' },
+      u?.available ? h('button', { type: 'button', class: 'btn primary', id: 'aboutUpdate', onclick: runUpdate }, 'Update now') : null,
+      h('button', { type: 'button', class: 'btn', onclick: guard(async () => { await lookForUpdate(true); tabAbout(); }) }, 'Check for updates')),
+    u?.available ? h('p', { class: 'fine' }, `Or run in a terminal: ${u.manual || ''}`) : null);
+}
+
 function tabAbout() {
   const keys = [['Ctrl+V', 'Paste text, or attach a copied image'], ['Ctrl+C', 'Copy the selection, or interrupt Claude'], ['Shift+Enter', 'New line in the prompt'], ['Ctrl+S', 'Save a note in the memory editor'], ['Esc', 'Close a window or cancel an edit']];
   $('tab-about').replaceChildren(
     h('h2', {}, 'About'),
+    updateBox(),
     h('dl', { class: 'kv' },
       h('dt', {}, 'Signed in as'), h('dd', {}, S.user.email), h('dt', {}, 'Version'), h('dd', { class: 'mono' }, S.version || '–'),
       h('dt', {}, 'This project'), h('dd', { class: 'mono' }, S.project.dir), h('dt', {}, 'Memory vault'), h('dd', { class: 'mono' }, S.project.vault)),
@@ -2019,6 +2050,8 @@ $('updateBtn').addEventListener('click', guard(async () => {
   await api('POST', '/api/restart', {});
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
 }));
+$('newBtn').addEventListener('click', runUpdate);
+setInterval(() => { if (!halted && !S.user?.guest) lookForUpdate(); }, 3600e3);
 $('mapFilter').addEventListener('input', () => syncBrain());
 $('sideTabs').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-side]'); if (b) setSide(b.dataset.side); });
 $('askForm').addEventListener('submit', (ev) => { ev.preventDefault(); sendAsk(); });

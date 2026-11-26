@@ -35,6 +35,14 @@ UltraClaude opens as many Claude Code sessions as you want for the same project 
   <img src="docs/features.svg" alt="Roles, one shared memory, agents that talk, a map of every chat, Ctrl+V for screenshots, a prompt that stays put" width="100%">
 </p>
 
+## Updating
+
+When a new version is out, UltraClaude shows **New update available** in the sidebar and under *Settings → About*. Press **Update now**, then **Restart now**. Installed before version 0.2.0? Run this once, then `ultraclaude` again in each project:
+
+```bash
+npm install -g github:ZH-NICO/ultraclaude
+```
+
 ## Quick start
 
 You need [Node.js](https://nodejs.org) 20 or newer and [Claude Code](https://claude.com/claude-code) (the `claude` command works in your terminal and you are signed in). Obsidian is optional, because the vault is a normal folder of Markdown files.
