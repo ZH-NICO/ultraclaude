@@ -42,7 +42,7 @@
 
   <aside class="side">
     <div class="brand">
-      <button type="button" class="wordmark" id="mapBtn" title="Mind corpus: every Claude Code chat on this computer">
+      <button type="button" class="wordmark" id="mapBtn" title="Brain: every Claude Code chat on this computer">
         <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M10 10V3.4M10 10l5.7 3.3M10 10l-5.7 3.3" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/><circle cx="10" cy="3.4" r="1.7" fill="currentColor"/><circle cx="15.7" cy="13.3" r="1.7" fill="currentColor"/><circle cx="4.3" cy="13.3" r="1.7" fill="currentColor"/></svg>
         ultraclaude
       </button>
@@ -203,22 +203,16 @@
 
     <section id="view-map" class="view" hidden>
       <header class="view-head">
-        <h1>Mind corpus</h1>
+        <h1>Brain</h1>
         <p class="sub" id="mapSummary"></p>
-        <input id="mapFilter" class="head-filter" placeholder="Search the corpus" autocomplete="off" aria-label="Search the corpus">
+        <input id="mapFilter" class="head-filter" placeholder="Search your brain" autocomplete="off" aria-label="Search your brain">
       </header>
-      <div class="chatmap corpus">
-        <div class="map-stage" id="mapStage">
-          <svg id="mapSvg" role="img" aria-label="Every Claude Code chat on this computer as a neuron, grouped by folder around the core"></svg>
-          <div class="hud-frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-          <div class="hud" id="corpusHud"></div>
-          <div class="hud-legend" id="corpusLegend"></div>
-          <div class="map-zoom">
-            <button type="button" class="btn" id="mapZoomIn" aria-label="Zoom in">+</button>
-            <button type="button" class="btn" id="mapZoomOut" aria-label="Zoom out">−</button>
-            <button type="button" class="btn" id="mapFit">Fit</button>
-          </div>
-          <p class="map-hint">Scroll to zoom · drag to move · click a cluster to open it, a neuron to read its trace</p>
+      <div class="chatmap brain">
+        <div class="map-stage brain-stage" id="mapStage">
+          <canvas id="brainCanvas" role="img" aria-label="Every Claude Code chat on this computer as a point of light in a turning brain, one coloured region per folder"></canvas>
+          <nav class="brain-legend" id="brainLegend" aria-label="Regions"></nav>
+          <div class="brain-stats" id="brainStats"></div>
+          <p class="map-hint">Drag to turn · scroll to zoom · double-click to reset · click a point to open its chat</p>
           <p class="map-empty" id="mapEmpty" hidden></p>
         </div>
         <aside class="map-detail" id="mapDetail"></aside>

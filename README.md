@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-you-get">What you get</a> ·
-  <a href="#every-chat-on-one-map-the-mind-corpus">Mind corpus</a> ·
+  <a href="#every-chat-in-one-brain">Brain</a> ·
   <a href="#shared-memory">Memory</a> ·
   <a href="#keyboard">Keyboard</a> ·
   <a href="#your-account">Account</a> ·
@@ -89,14 +89,14 @@ npm link
 
 In the Overview every agent is an animated pixel pet, so you see its state from how it moves (see [The pets](#the-pets)). The window follows your system's light or dark theme.
 
-## Every chat on one map: the mind corpus
+## Every chat in one brain
 
-Click **ultraclaude** at the top left to open the **mind corpus**. A glowing core sits in the middle with your drive behind it, every folder on the way to a Claude Code chat is a cluster around it, and each chat is a neuron in the folder it was opened in. Its colour tells how fresh the memory is: orange today, gold this week, cyan this month, violet older, and today's neurons pulse. Signals run along the synapses, orbits and a radar sweep turn behind it, and a HUD reads out how many memories, clusters and how much text it holds. When it opens, the synapses draw themselves outwards ring by ring. Click a cluster to open it, a neuron to read its memory trace, scroll to zoom, drag to move. Pick a chat to continue it, or open its folder in its own UltraClaude window. It holds still when your system asks for reduced motion.
+Click **ultraclaude** at the top left to open your **brain**: every Claude Code chat on this computer as a point of light in a slowly turning 3D brain, with its cerebrum, cerebellum and stem. Thousands of small points form the shape, coloured in one spectrum that runs round it. Each folder you used Claude Code in is a region of that spectrum, listed on the left with its count, and each chat is a brighter neuron in its region; today's pulse, and now and then a few neurons of a region fire together. When it opens, the brain builds itself from the stem upwards. Drag to turn it, scroll to zoom, double-click to reset. Hover a point to see the chat, click it to read it and continue it, or click a region to light up only that folder. Search lights up what matches. It holds still when your system asks for reduced motion. Inspired by the look of [mindcorpus.org](https://mindcorpus.org/); drawn by UltraClaude itself, without any of its code or assets.
 
 <p align="center">
-  <img src="docs/map.gif" alt="The chat map: zooming into code, opening folders, picking a chat" width="100%">
+  <img src="docs/brain.gif" alt="The brain: a turning 3D cloud of light in the shape of a brain, coloured by folder, building itself from the stem upwards" width="70%">
   <br>
-  <sub>Shown on a made-up drive.</sub>
+  <sub>Shown on a made-up chat history.</sub>
 </p>
 
 ## The pets

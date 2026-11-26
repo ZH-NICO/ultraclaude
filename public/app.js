@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
 import { layout, degrees, dotSize, panZoom } from './graph.js';
 import { petSprite, petPlace, petMood } from './pet.js';
+import { BrainView } from './brain.js';
 
 const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay', 'changes', 'missions'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
@@ -75,329 +76,87 @@ function setView(view) {
   if (view === 'overview') { syncGraph(); $('feed').scrollTop = $('feed').scrollHeight; }
   if (view === 'agents') layoutTerms();
   if (view === 'memory') { loadNotes(); if (G.mode === 'graph') loadGraph(); }
-  if (view === 'map') { corpusBoot = true; loadChats(); }
+  if (view === 'map') { brain?.rebootAnimation(); loadChats(); } else brain?.stop();
   if (view === 'replay') loadReplay();
   if (view === 'changes') loadChanges();
   if (view !== 'replay') rpPause();
 }
 
-// ---------- map of all chats ----------
-// The drive in the middle, every folder on the way to a Claude Code chat on the rings around it
-// (with all its sibling folders), and every chat as a dot in the folder it was opened in. Any
-// folder can be opened to show its subfolders. Wheel zooms, dragging moves, Fit shows everything.
+// ---------- brain: every chat on this computer ----------
+// A turning 3D cloud of light shaped like a brain. Each folder with Claude Code chats is a region in
+// its own colour, each chat a neuron in it. Drag turns it, the wheel zooms, a neuron opens its chat.
 
 let chatData = null;
-let chatPick = null; // { key, id } for a chat, { folder } for a folder
-let mapRoot = null;
-let mapView = null; // { x, y, k }: pan and zoom
-let mapRadius = 0;
-let mapDragged = false;
-const RING = 150; // distance between two folder levels
-const FEW = 12; // a folder with many other subfolders shows this many, then "+N more"
+let chatPick = null; // { key, id } for a chat, { region } for a folder
+let brain = null;
 
 const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
 const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const keyOf = (name, sep) => (sep === '\\' ? name.toLowerCase() : name);
 const samePath = (a, b) => !!a && !!b && a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase();
-const folderNode = (name, p, sep) => ({ type: 'dir', name, path: p, sep, kids: new Map(), chats: [], onPath: false, open: false, loaded: false, showAll: false });
-
-function childFolder(parent, name) {
-  const k = keyOf(name, parent.sep);
-  if (!parent.kids.has(k)) {
-    const p = parent.path.endsWith(parent.sep) ? parent.path + name : parent.path + parent.sep + name;
-    parent.kids.set(k, folderNode(name, p, parent.sep));
-  }
-  return parent.kids.get(k);
-}
-
-function buildFolderTree(projects) {
-  const roots = new Map();
-  for (const pr of projects) {
-    if (!pr.dir) continue;
-    const sep = pr.dir.includes('\\') ? '\\' : '/';
-    const parts = pr.dir.split(/[\\/]+/);
-    const rootName = sep === '\\' ? `${parts[0]}\\` : '/';
-    if (!roots.has(rootName.toLowerCase())) roots.set(rootName.toLowerCase(), folderNode(rootName, rootName, sep));
-    let n = roots.get(rootName.toLowerCase());
-    n.onPath = n.open = true;
-    for (const part of parts.slice(1).filter(Boolean)) { n = childFolder(n, part); n.onPath = n.open = true; }
-    for (const s of pr.sessions) n.chats.push({ type: 'chat', s, pr });
-  }
-  if (roots.size === 1) return [...roots.values()][0];
-  const top = Object.assign(folderNode('This computer', '', '\\'), { onPath: true, open: true, loaded: true, virtual: true });
-  for (const [k, r] of roots) top.kids.set(k, r);
-  return top;
-}
-
-async function loadDirs(n) {
-  if (n.loaded || n.virtual) return;
-  n.loaded = true;
-  try {
-    const { dirs, unreadable } = await api('GET', `/api/dirs?path=${encodeURIComponent(n.path)}`);
-    for (const d of dirs) childFolder(n, d);
-    n.unreadable = !!unreadable;
-  } catch { n.unreadable = true; }
-}
-
-function findFolder(n, p) {
-  if (!n) return null;
-  if (n.path === p) return n;
-  for (const c of n.kids.values()) { const hit = findFolder(c, p); if (hit) return hit; }
-  return null;
-}
-const chatsBelow = (n) => n.chats.length + [...n.kids.values()].reduce((sum, c) => sum + chatsBelow(c), 0);
 
 const loadChats = guard(async () => {
+  if (!brain) {
+    brain = new BrainView($('brainCanvas'), { calm, onPick: (n) => { chatPick = { key: n.pr.key, id: n.s.id }; syncBrain(); } });
+    $('brainCanvas').view = brain; // lets the browser tests find a point on screen
+    new ResizeObserver(() => { if (S.view === 'map') brain.draw(); }).observe($('mapStage'));
+  }
   try {
     chatData = (await api('GET', '/api/chats')).projects;
   } catch {
-    setText($('mapSummary'), '');
-    $('mapSvg').replaceChildren();
-    $('mapDetail').replaceChildren();
+    chatData = [];
+    brain.setData([]);
     $('mapEmpty').hidden = false;
     setText($('mapEmpty'), 'The UltraClaude server behind this window is older than the window and cannot list chats yet. Run “ultraclaude” in this folder to update it.');
     return;
   }
-  const openBefore = new Set();
-  const remember = (n) => { if (n.open) openBefore.add(n.path); n.kids.forEach(remember); };
-  if (mapRoot) remember(mapRoot);
-  mapRoot = buildFolderTree(chatData);
-  // every folder on the way to a chat shows all of its subfolders
-  const onPath = [];
-  const collect = (n) => { if (n.onPath) onPath.push(n); n.kids.forEach(collect); };
-  collect(mapRoot);
-  await Promise.all(onPath.map(loadDirs));
-  for (const p of openBefore) { const n = findFolder(mapRoot, p); if (n && !n.onPath) { n.open = true; await loadDirs(n); } }
+  brain.setData(chatData);
   if (!chatPick) {
     const newest = chatData.flatMap((pr) => pr.sessions.map((s) => ({ pr, s }))).sort((a, b) => b.s.updated - a.s.updated)[0];
     if (newest) chatPick = { key: newest.pr.key, id: newest.s.id };
   }
-  mapView = null;
-  renderMap();
+  syncBrain();
+  if (S.view === 'map') brain.start();
 });
 
-/** What a node shows on the ring outside it: subfolders (when open) and its chats. */
-function mapKids(n) {
-  if (n.type !== 'dir') return [];
-  let folders = [];
-  let more = null;
-  if (n.open) {
-    const all = [...n.kids.values()];
-    const others = all.filter((f) => !f.onPath);
-    const shown = n.showAll || others.length <= FEW + 4 ? others : others.slice(0, FEW);
-    folders = [...all.filter((f) => f.onPath), ...shown].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    if (shown.length < others.length) more = { type: 'more', parent: n, count: others.length - shown.length, path: `${n.path}\0more` };
-  }
-  return [...folders, ...(more ? [more] : []), ...n.chats];
-}
-
-// The mind corpus: every Claude Code chat on this computer as a neuron, folders as clusters, linked by
-// synapses that carry signals, around a glowing core. Colour tells how fresh a memory is.
-const CORPUS_TIERS = [[864e5, 'hot', 'today'], [7 * 864e5, 'warm', 'this week'], [30 * 864e5, 'cold', 'this month'], [Infinity, 'frozen', 'older']];
-const TIER_COLOR = { hot: '#ff9a4d', warm: '#ffd36e', cold: '#56c8ff', frozen: '#9b8cff' };
-const tierOf = (t) => CORPUS_TIERS.find(([age]) => Date.now() - t < age)[1];
-let corpusBoot = false; // set when the view opens: the next drawing plays the boot sequence
-
-function corpusDefs() {
-  const grad = (id, stops) => svg('radialGradient', { id }, ...stops.map(([o, c, a]) => svg('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
-  return svg('defs', {},
-    grad('cg-core', [[0, '#fff7ec', 1], [0.35, '#ffbe8a', 0.95], [0.72, '#e0683c', 0.6], [1, '#e0683c', 0]]),
-    grad('cg-aura', [[0, '#ff8a4c', 0.32], [0.45, '#ff6a2c', 0.08], [1, '#ff6a2c', 0]]),
-    ...Object.entries(TIER_COLOR).map(([k, c]) => grad(`cg-${k}`, [[0, c, 0.8], [0.35, c, 0.24], [1, c, 0]])),
-    svg('linearGradient', { id: 'cg-sweep', x1: 0, y1: 0, x2: 0, y2: 1 }, svg('stop', { offset: 0, 'stop-color': '#56c8ff', 'stop-opacity': 0 }), svg('stop', { offset: 1, 'stop-color': '#56c8ff', 'stop-opacity': 0.12 })));
-}
-
-/** A slow endless turn around the local centre (SMIL, so no script runs per frame). */
-const spin = (dur, reverse = false) => (calm ? null : svg('animateTransform', { attributeName: 'transform', type: 'rotate', from: reverse ? '360' : '0', to: reverse ? '0' : '360', dur: `${dur}s`, repeatCount: 'indefinite' }));
-
-function renderMap() {
-  if (!chatData || !mapRoot) return;
+function syncBrain() {
+  if (!chatData || !brain?.model) return;
   const all = chatData.flatMap((pr) => pr.sessions);
-  setText($('mapSummary'), `${all.length} ${all.length === 1 ? 'memory' : 'memories'} in ${plural(chatData.length, 'cluster')}`);
+  setText($('mapSummary'), `${all.length} ${all.length === 1 ? 'memory' : 'memories'} · ${plural(chatData.length, 'region')}`);
   $('mapEmpty').hidden = all.length > 0;
-  renderCorpusHud(all);
-  if (!all.length) { setText($('mapEmpty'), 'The corpus is empty: no Claude Code chats on this computer yet.'); $('mapSvg').replaceChildren(); return renderChatDetail(); }
-
-  // radial layout: each node gets a slice of the circle in proportion to what hangs below it
-  const weigh = (n) => { n._kids = mapKids(n); n._w = n._kids.length ? n._kids.reduce((s, c) => s + weigh(c), 0) : 1; return n._w; };
-  weigh(mapRoot);
-  mapRadius = 0;
-  const place = (n, a0, a1, depth) => {
-    n._a = (a0 + a1) / 2;
-    n._r = depth * RING;
-    n._d = depth;
-    mapRadius = Math.max(mapRadius, n._r);
-    let a = a0;
-    for (const c of n._kids) { const span = ((a1 - a0) * c._w) / n._w; place(c, a, a + span, depth + 1); a += span; }
-  };
-  place(mapRoot, -Math.PI / 2, Math.PI * 1.5, 0);
-
+  if (!all.length) setText($('mapEmpty'), 'Nothing in here yet. Every Claude Code chat on this computer lights up here.');
   const q = $('mapFilter').value.trim().toLowerCase();
-  const hit = (c) => !q || `${c.s.title} ${c.s.firstPrompt} ${c.pr.name}`.toLowerCase().includes(q);
-  const hitsBelow = (n) => n.chats.some(hit) || [...n.kids.values()].some(hitsBelow);
-  const biggest = Math.max(...all.map((s) => s.size));
-  const pt = (a, r) => `${(r * Math.cos(a)).toFixed(1)},${(r * Math.sin(a)).toFixed(1)}`;
-  const links = [];
-  const routes = []; // synapses that may carry a signal
-  const nodes = [];
-  const walk = (n) => {
-    for (const c of n._kids) {
-      const mid = (n._r + c._r) / 2;
-      const strong = c.type === 'chat' || c.onPath;
-      const tier = c.type === 'chat' ? tierOf(c.s.updated) : '';
-      const d = `M${pt(n._a, n._r)}C${pt(n._a, mid)} ${pt(c._a, mid)} ${pt(c._a, c._r)}`;
-      links.push(svg('path', { class: `ml${strong ? ' strong' : ''}${tier ? ` t-${tier}` : ''}`, d, pathLength: 1, style: `--d:${c._d}` }));
-      if (strong && (c.type !== 'chat' || hit(c))) routes.push({ d, tier });
-      nodes.push(c);
-      walk(c);
-    }
-  };
-  walk(mapRoot);
-
-  const label = (n, text, extra) => {
-    const deg = (n._a * 180) / Math.PI;
-    const flip = Math.cos(n._a) < 0;
-    // the gap to the dot is in em, so it grows with the text when labels keep their size while zoomed out
-    return svg('text', { dx: flip ? '-0.95em' : '0.95em', 'dominant-baseline': 'central', 'text-anchor': flip ? 'end' : 'start', transform: `rotate(${(flip ? deg + 180 : deg).toFixed(1)})` }, text, extra);
-  };
-  // a targeting reticle around what is picked
-  const reticle = (r) => svg('g', { class: 'ring reticle' },
-    svg('path', { d: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => `M${sx * r} ${sy * (r - 4)}V${sy * r}H${sx * (r - 4)}`).join('') }), spin(7));
-  const nodeEl = (n) => {
-    const at = `translate(${pt(n._a, n._r)})`;
-    let g;
-    if (n.type === 'chat') {
-      const r = 2.8 + 4 * Math.sqrt(n.s.size / biggest);
-      const tier = tierOf(n.s.updated);
-      const sel = chatPick?.key === n.pr.key && chatPick?.id === n.s.id;
-      g = svg('g', { class: `mnode chat t-${tier}${n.pr.current ? ' here' : ''}${hit(n) ? '' : ' dim'}`, transform: at, tabindex: 0, role: 'button', 'aria-label': `${n.s.title}, ${n.pr.name}`, style: `--d:${n._d}` },
-        svg('title', {}, `${n.s.title}\n${n.pr.dir || n.pr.name} · ${stamp(n.s.updated)}`),
-        svg('circle', { class: 'halo', r: (r * 3.6).toFixed(1), fill: `url(#cg-${tier})` }),
-        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: r.toFixed(1) }), sel ? reticle(r + 7) : null,
-        label(n, cut(n.s.title, 36)));
-      g.addEventListener('click', () => { if (mapDragged) return; chatPick = { key: n.pr.key, id: n.s.id }; renderMap(); });
-    } else if (n.type === 'more') {
-      g = svg('g', { class: 'mnode more', transform: at, tabindex: 0, role: 'button', style: `--d:${n._d}` },
-        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: 4 }), label(n, `+${n.count} more folders`));
-      g.addEventListener('click', () => { if (mapDragged) return; n.parent.showAll = true; renderMap(); });
-    } else {
-      const below = chatsBelow(n);
-      const current = samePath(n.path, S.project?.dir);
-      const sel = chatPick?.folder === n.path;
-      g = svg('g', { class: `mnode dir${n.onPath ? ' path' : ''}${n.open ? ' open' : ''}${current ? ' current' : ''}${q && !hitsBelow(n) ? ' dim' : ''}`, transform: at, tabindex: 0, role: 'button', 'aria-label': n.path, 'aria-expanded': String(n.open), style: `--d:${n._d}` },
-        svg('title', {}, n.path),
-        n.onPath ? svg('circle', { class: 'halo', r: 14, fill: 'url(#cg-cold)' }) : null,
-        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: n.onPath ? 4.5 : 3.5 }), sel ? reticle(11) : null,
-        label(n, n.name, below ? svg('tspan', { class: 'cnt', dx: 6 }, current ? `${below} · this folder` : String(below)) : (current ? svg('tspan', { class: 'cnt', dx: 6 }, 'this folder') : null)));
-      g.addEventListener('click', guard(async () => {
-        if (mapDragged) return;
-        const wasPicked = chatPick?.folder === n.path;
-        chatPick = { folder: n.path };
-        if (!n.open) { n.open = true; await loadDirs(n); } else if (wasPicked) n.open = false;
-        renderMap();
-      }));
-    }
-    g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); g.dispatchEvent(new MouseEvent('click', { bubbles: true })); } });
-    return g;
-  };
-
-  // the backdrop: orbits at every ring, turning slowly in turns, and a radar sweep
-  const depth = Math.round(mapRadius / RING);
-  const reach = mapRadius + 60;
-  const orbits = Array.from({ length: depth }, (_, i) => svg('circle', { class: `orbit${i % 2 ? ' alt' : ''}`, r: (i + 1) * RING }, spin(120 + i * 40, i % 2 === 1)));
-  const sweep = calm ? null : svg('g', { class: 'sweep' },
-    svg('path', { d: `M0 0L${reach} 0A${reach} ${reach} 0 0 0 ${(reach * Math.cos(-0.55)).toFixed(1)} ${(reach * Math.sin(-0.55)).toFixed(1)}Z`, fill: 'url(#cg-sweep)' }),
-    svg('line', { x1: 0, y1: 0, x2: reach, y2: 0 }), spin(9));
-
-  // signals running out along the synapses
-  const signals = [];
-  if (!calm) {
-    for (let i = routes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [routes[i], routes[j]] = [routes[j], routes[i]]; }
-    for (const r of routes.slice(0, 44)) {
-      signals.push(svg('circle', { class: `sig${r.tier ? ` t-${r.tier}` : ''}`, r: 1.9 },
-        svg('animateMotion', { dur: `${(1.3 + Math.random() * 2).toFixed(2)}s`, begin: `${(Math.random() * 3.5).toFixed(2)}s`, repeatCount: 'indefinite', path: r.d })));
-    }
-  }
-
-  const hot = all.filter((s) => tierOf(s.updated) === 'hot').length;
-  const center = svg('g', { class: 'map-center core', tabindex: 0, role: 'button', 'aria-label': mapRoot.virtual ? 'This computer' : mapRoot.path },
-    svg('title', {}, mapRoot.virtual ? 'This computer' : mapRoot.path),
-    svg('circle', { class: 'aura', r: 140, fill: 'url(#cg-aura)' }),
-    svg('circle', { class: 'c-ring r1', r: 44 }, spin(14)),
-    svg('circle', { class: 'c-ring r2', r: 54 }, spin(24, true)),
-    svg('circle', { class: 'c-ring r3', r: 64 }, spin(46)),
-    svg('circle', { class: 'orb', r: 28, fill: 'url(#cg-core)' }, calm ? null : svg('animate', { attributeName: 'r', values: `28;${hot ? 33 : 30.5};28`, dur: hot ? '2.2s' : '3.6s', repeatCount: 'indefinite' })),
-    svg('text', { class: 'c-title', y: 90 }, 'MIND CORPUS'),
-    svg('text', { class: 'count', y: 107 }, `${all.length} memories · ${mapRoot.virtual ? 'this computer' : mapRoot.name}`));
-  center.addEventListener('click', () => { if (mapDragged) return; chatPick = { folder: mapRoot.path }; renderMap(); });
-
-  const world = svg('g', { id: 'mapWorld', class: corpusBoot && !calm ? 'boot' : '' }, svg('g', { class: 'backdrop' }, orbits, sweep), links, svg('g', { class: 'signals' }, signals), nodes.map(nodeEl), center);
-  corpusBoot = false;
-  $('mapSvg').replaceChildren(corpusDefs(), world);
-  applyView();
+  brain.match = q ? (n) => `${n.s.title} ${n.s.firstPrompt} ${n.pr.name}`.toLowerCase().includes(q) : null;
+  brain.focus = chatPick?.region || null;
+  brain.selected = chatPick?.id ? `${chatPick.key}/${chatPick.id}` : null;
+  const hits = q ? brain.model.neurons.filter(brain.match).length : 0;
+  $('brainLegend').replaceChildren(...brain.model.regions.map((r) => h('button', {
+    type: 'button', class: `region${brain.focus === r.key ? ' on' : ''}${brain.focus && brain.focus !== r.key ? ' off' : ''}`, style: `--rc:${r.color}`, title: r.pr.dir || r.pr.name,
+    onclick: () => { chatPick = chatPick?.region === r.key ? null : { region: r.key }; syncBrain(); },
+  }, h('i'), h('span', {}, r.pr.name), h('b', {}, String(r.neurons.length)))));
+  const bytes = all.reduce((sum, s) => sum + (s.size || 0), 0);
+  $('brainStats').replaceChildren(
+    h('p', {}, h('b', {}, q ? String(hits) : String(all.length)), q ? ` of ${all.length} match` : ` ${all.length === 1 ? 'memory' : 'memories'}`),
+    h('p', {}, h('b', {}, String(chatData.length)), ` ${chatData.length === 1 ? 'region' : 'regions'}`),
+    h('p', {}, h('b', {}, kb(bytes)), ' of thought'));
+  if (!brain.running) brain.draw();
   renderChatDetail();
 }
 
-/** The readout in the corner of the corpus. */
-function renderCorpusHud(all) {
-  const count = Object.fromEntries(CORPUS_TIERS.map(([, k]) => [k, 0]));
-  for (const s of all) count[tierOf(s.updated)]++;
-  const bytes = all.reduce((sum, s) => sum + (s.size || 0), 0);
-  const newest = all.reduce((m, s) => Math.max(m, s.updated || 0), 0);
-  $('corpusHud').replaceChildren(
-    h('p', { class: 'hud-title' }, h('i', { class: 'live' }), 'Neural index online'),
-    h('dl', {},
-      h('dt', {}, 'Memories'), h('dd', {}, String(all.length)),
-      h('dt', {}, 'Clusters'), h('dd', {}, String(chatData.length)),
-      h('dt', {}, 'Mass'), h('dd', {}, kb(bytes)),
-      h('dt', {}, 'Last spark'), h('dd', {}, newest ? ago(newest) : '–')));
-  $('corpusLegend').replaceChildren(...CORPUS_TIERS.map(([, k, text]) => h('span', { class: `lg t-${k}` }, h('i'), `${text} `, h('b', {}, String(count[k])))));
-}
-
-function applyView() {
-  const stage = $('mapStage');
-  if (!stage || !$('mapWorld')) return; // gone after Quit
-  const w = stage.clientWidth;
-  const ht = stage.clientHeight;
-  if (!w || !ht) return;
-  if (!mapView) {
-    const reach = mapRadius + 120; // room for the outermost labels
-    mapView = { x: w / 2, y: ht / 2, k: Math.min(1.2, Math.min(w, ht) / (2 * reach)) };
-  }
-  const world = $('mapWorld');
-  world.setAttribute('transform', `translate(${mapView.x.toFixed(1)},${mapView.y.toFixed(1)}) scale(${mapView.k.toFixed(4)})`);
-  // Zoomed out, the centre, the dots and the names of the folders that lead to chats keep their size
-  // on screen, so the whole map stays readable; everything else is labelled once you zoom in.
-  const far = mapView.k < 0.6;
-  $('mapSvg').classList.toggle('far', far);
-  world.style.setProperty('--inv', far ? String(0.6 / mapView.k) : '1');
-  world.style.setProperty('--dot', far ? String(Math.min(2.2, 0.6 / mapView.k)) : '1');
-}
-
-function zoomAt(x, y, factor) {
-  if (!mapView) return;
-  const k = Math.min(4, Math.max(0.05, mapView.k * factor));
-  mapView.x = x - ((x - mapView.x) * k) / mapView.k;
-  mapView.y = y - ((y - mapView.y) * k) / mapView.k;
-  mapView.k = k;
-  applyView();
-}
-
 function renderChatDetail() {
-  if (chatPick && 'folder' in chatPick) return renderFolderDetail(findFolder(mapRoot, chatPick.folder));
+  if (chatPick?.region) return renderRegionDetail(chatData?.find((p) => p.key === chatPick.region));
   const pr = chatData?.find((p) => p.key === chatPick?.key);
   const s = pr?.sessions.find((x) => x.id === chatPick.id);
-  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'kicker' }, 'Awaiting signal'), h('p', { class: 'none' }, 'Pick a neuron to read its memory trace, or a cluster to see what it holds.'));
+  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to open that chat, or a region on the left.'));
+  const color = brain?.model?.regions.find((r) => r.key === pr.key)?.color;
   const agent = S.agents.find((a) => a.sessionId === s.id);
   let action = null;
   if (pr.current && agent) action = h('button', { type: 'button', class: 'btn primary', onclick: () => openAgent(agent.id) }, 'Open its terminal');
   else if (pr.current) action = h('button', { type: 'button', class: 'btn primary', onclick: () => createAgent({ sessionId: s.id }) }, 'Continue here');
   else if (pr.dir) action = openFolderButton(pr.dir, pr.name);
-  const tier = tierOf(s.updated);
   $('mapDetail').replaceChildren(...[
-    h('p', { class: `kicker t-${tier}` }, h('i'), `Memory trace · ${CORPUS_TIERS.find(([, k]) => k === tier)[2]}`),
+    h('p', { class: 'kicker', style: `--rc:${color}` }, h('i'), pr.name),
     h('h2', {}, s.title),
-    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, stamp(s.updated)), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
+    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, `${stamp(s.updated)} · ${ago(s.updated)}`), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
     s.firstPrompt && s.firstPrompt !== s.title ? h('div', {}, h('h3', {}, 'Began with'), h('p', { class: 'quote' }, s.firstPrompt)) : null,
     action,
     pr.current ? null : h('p', { class: 'none' }, 'Chats from other folders continue in that folder’s own UltraClaude window.'),
@@ -411,17 +170,16 @@ function openFolderButton(dir, name) {
   }) }, 'Open folder in UltraClaude');
 }
 
-function renderFolderDetail(n) {
-  if (!n) return $('mapDetail').replaceChildren(h('p', { class: 'kicker' }, 'Awaiting signal'), h('p', { class: 'none' }, 'Pick a neuron to read its memory trace, or a cluster to see what it holds.'));
-  const below = chatsBelow(n);
-  const here = samePath(n.path, S.project?.dir);
+function renderRegionDetail(pr) {
+  if (!pr) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to open that chat, or a region on the left.'));
+  const color = brain?.model?.regions.find((r) => r.key === pr.key)?.color;
+  const here = samePath(pr.dir, S.project?.dir);
   $('mapDetail').replaceChildren(...[
-    h('p', { class: 'kicker' }, h('i'), n.virtual ? 'Core' : 'Cluster'),
-    h('h2', {}, n.virtual ? 'This computer' : n.name),
-    n.virtual ? null : h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, n.path), h('dt', {}, 'Chats'), h('dd', {}, below ? `${below} in here and below` : 'none'), h('dt', {}, 'Subfolders'), h('dd', {}, n.loaded ? String(n.kids.size) : 'not opened yet')),
-    n.chats.length ? h('div', {}, h('h3', {}, 'Chats in this folder'), h('ul', { class: 'map-list' }, n.chats.map((c) => h('li', {}, h('a', { onclick: () => { chatPick = { key: c.pr.key, id: c.s.id }; renderMap(); } }, c.s.title))))) : null,
-    n.unreadable ? h('p', { class: 'none' }, 'Windows does not allow reading this folder.') : null,
-    n.virtual ? null : here ? h('p', { class: 'none' }, 'This window already belongs to this folder.') : openFolderButton(n.path, n.name),
+    h('p', { class: 'kicker', style: `--rc:${color}` }, h('i'), 'Region'),
+    h('h2', {}, pr.name),
+    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.key), h('dt', {}, 'Chats'), h('dd', {}, String(pr.sessions.length)), h('dt', {}, 'Last active'), h('dd', {}, ago(pr.updated))),
+    h('div', {}, h('h3', {}, 'Chats in this region'), h('ul', { class: 'map-list' }, pr.sessions.map((s) => h('li', {}, h('a', { onclick: () => { chatPick = { key: pr.key, id: s.id }; syncBrain(); } }, s.title))))),
+    here ? h('p', { class: 'none' }, 'This window already belongs to this folder.') : pr.dir ? openFolderButton(pr.dir, pr.name) : null,
   ].filter(Boolean));
 }
 
@@ -2125,44 +1883,7 @@ $('updateBtn').addEventListener('click', guard(async () => {
   await api('POST', '/api/restart', {});
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
 }));
-$('mapFilter').addEventListener('input', renderMap);
-{
-  // map: the wheel zooms around the pointer, dragging moves the map (a drag never counts as a click)
-  const stage = $('mapStage');
-  let drag = null;
-  stage.addEventListener('wheel', (ev) => {
-    ev.preventDefault();
-    const r = stage.getBoundingClientRect();
-    zoomAt(ev.clientX - r.left, ev.clientY - r.top, Math.exp(-ev.deltaY * 0.0015));
-  }, { passive: false });
-  stage.addEventListener('pointerdown', (ev) => {
-    if (ev.button !== 0 || !mapView || ev.target.closest('.map-zoom')) return;
-    drag = { x: ev.clientX, y: ev.clientY, vx: mapView.x, vy: mapView.y };
-    mapDragged = false;
-  });
-  window.addEventListener('pointermove', (ev) => {
-    if (!drag) return;
-    const dx = ev.clientX - drag.x;
-    const dy = ev.clientY - drag.y;
-    if (!mapDragged && Math.hypot(dx, dy) < 4) return;
-    mapDragged = true;
-    stage.classList.add('dragging');
-    mapView.x = drag.vx + dx;
-    mapView.y = drag.vy + dy;
-    applyView();
-  });
-  window.addEventListener('pointerup', () => {
-    if (!drag) return;
-    drag = null;
-    stage.classList.remove('dragging');
-    setTimeout(() => { mapDragged = false; }, 0);
-  });
-  const middle = () => [stage.clientWidth / 2, stage.clientHeight / 2];
-  $('mapZoomIn').addEventListener('click', () => zoomAt(...middle(), 1.4));
-  $('mapZoomOut').addEventListener('click', () => zoomAt(...middle(), 1 / 1.4));
-  $('mapFit').addEventListener('click', () => { mapView = null; applyView(); });
-  new ResizeObserver(() => { if (S.view === 'map') applyView(); }).observe(stage);
-}
+$('mapFilter').addEventListener('input', () => syncBrain());
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder
