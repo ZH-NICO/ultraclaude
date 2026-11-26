@@ -75,7 +75,7 @@ function setView(view) {
   if (view === 'overview') { syncGraph(); $('feed').scrollTop = $('feed').scrollHeight; }
   if (view === 'agents') layoutTerms();
   if (view === 'memory') { loadNotes(); if (G.mode === 'graph') loadGraph(); }
-  if (view === 'map') loadChats();
+  if (view === 'map') { corpusBoot = true; loadChats(); }
   if (view === 'replay') loadReplay();
   if (view === 'changes') loadChanges();
   if (view !== 'replay') rpPause();
@@ -191,12 +191,32 @@ function mapKids(n) {
   return [...folders, ...(more ? [more] : []), ...n.chats];
 }
 
+// The mind corpus: every Claude Code chat on this computer as a neuron, folders as clusters, linked by
+// synapses that carry signals, around a glowing core. Colour tells how fresh a memory is.
+const CORPUS_TIERS = [[864e5, 'hot', 'today'], [7 * 864e5, 'warm', 'this week'], [30 * 864e5, 'cold', 'this month'], [Infinity, 'frozen', 'older']];
+const TIER_COLOR = { hot: '#ff9a4d', warm: '#ffd36e', cold: '#56c8ff', frozen: '#9b8cff' };
+const tierOf = (t) => CORPUS_TIERS.find(([age]) => Date.now() - t < age)[1];
+let corpusBoot = false; // set when the view opens: the next drawing plays the boot sequence
+
+function corpusDefs() {
+  const grad = (id, stops) => svg('radialGradient', { id }, ...stops.map(([o, c, a]) => svg('stop', { offset: o, 'stop-color': c, 'stop-opacity': a })));
+  return svg('defs', {},
+    grad('cg-core', [[0, '#fff7ec', 1], [0.35, '#ffbe8a', 0.95], [0.72, '#e0683c', 0.6], [1, '#e0683c', 0]]),
+    grad('cg-aura', [[0, '#ff8a4c', 0.32], [0.45, '#ff6a2c', 0.08], [1, '#ff6a2c', 0]]),
+    ...Object.entries(TIER_COLOR).map(([k, c]) => grad(`cg-${k}`, [[0, c, 0.8], [0.35, c, 0.24], [1, c, 0]])),
+    svg('linearGradient', { id: 'cg-sweep', x1: 0, y1: 0, x2: 0, y2: 1 }, svg('stop', { offset: 0, 'stop-color': '#56c8ff', 'stop-opacity': 0 }), svg('stop', { offset: 1, 'stop-color': '#56c8ff', 'stop-opacity': 0.12 })));
+}
+
+/** A slow endless turn around the local centre (SMIL, so no script runs per frame). */
+const spin = (dur, reverse = false) => (calm ? null : svg('animateTransform', { attributeName: 'transform', type: 'rotate', from: reverse ? '360' : '0', to: reverse ? '0' : '360', dur: `${dur}s`, repeatCount: 'indefinite' }));
+
 function renderMap() {
   if (!chatData || !mapRoot) return;
   const all = chatData.flatMap((pr) => pr.sessions);
-  setText($('mapSummary'), `${plural(all.length, 'chat')} in ${plural(chatData.length, 'folder')}`);
+  setText($('mapSummary'), `${all.length} ${all.length === 1 ? 'memory' : 'memories'} in ${plural(chatData.length, 'cluster')}`);
   $('mapEmpty').hidden = all.length > 0;
-  if (!all.length) { setText($('mapEmpty'), 'No Claude Code chats on this computer yet.'); $('mapSvg').replaceChildren(); return renderChatDetail(); }
+  renderCorpusHud(all);
+  if (!all.length) { setText($('mapEmpty'), 'The corpus is empty: no Claude Code chats on this computer yet.'); $('mapSvg').replaceChildren(); return renderChatDetail(); }
 
   // radial layout: each node gets a slice of the circle in proportion to what hangs below it
   const weigh = (n) => { n._kids = mapKids(n); n._w = n._kids.length ? n._kids.reduce((s, c) => s + weigh(c), 0) : 1; return n._w; };
@@ -205,6 +225,7 @@ function renderMap() {
   const place = (n, a0, a1, depth) => {
     n._a = (a0 + a1) / 2;
     n._r = depth * RING;
+    n._d = depth;
     mapRadius = Math.max(mapRadius, n._r);
     let a = a0;
     for (const c of n._kids) { const span = ((a1 - a0) * c._w) / n._w; place(c, a, a + span, depth + 1); a += span; }
@@ -217,12 +238,16 @@ function renderMap() {
   const biggest = Math.max(...all.map((s) => s.size));
   const pt = (a, r) => `${(r * Math.cos(a)).toFixed(1)},${(r * Math.sin(a)).toFixed(1)}`;
   const links = [];
+  const routes = []; // synapses that may carry a signal
   const nodes = [];
   const walk = (n) => {
     for (const c of n._kids) {
       const mid = (n._r + c._r) / 2;
       const strong = c.type === 'chat' || c.onPath;
-      links.push(svg('path', { class: `ml${strong ? ' strong' : ''}`, d: `M${pt(n._a, n._r)}C${pt(n._a, mid)} ${pt(c._a, mid)} ${pt(c._a, c._r)}` }));
+      const tier = c.type === 'chat' ? tierOf(c.s.updated) : '';
+      const d = `M${pt(n._a, n._r)}C${pt(n._a, mid)} ${pt(c._a, mid)} ${pt(c._a, c._r)}`;
+      links.push(svg('path', { class: `ml${strong ? ' strong' : ''}${tier ? ` t-${tier}` : ''}`, d, pathLength: 1, style: `--d:${c._d}` }));
+      if (strong && (c.type !== 'chat' || hit(c))) routes.push({ d, tier });
       nodes.push(c);
       walk(c);
     }
@@ -235,28 +260,34 @@ function renderMap() {
     // the gap to the dot is in em, so it grows with the text when labels keep their size while zoomed out
     return svg('text', { dx: flip ? '-0.95em' : '0.95em', 'dominant-baseline': 'central', 'text-anchor': flip ? 'end' : 'start', transform: `rotate(${(flip ? deg + 180 : deg).toFixed(1)})` }, text, extra);
   };
+  // a targeting reticle around what is picked
+  const reticle = (r) => svg('g', { class: 'ring reticle' },
+    svg('path', { d: [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => `M${sx * r} ${sy * (r - 4)}V${sy * r}H${sx * (r - 4)}`).join('') }), spin(7));
   const nodeEl = (n) => {
     const at = `translate(${pt(n._a, n._r)})`;
     let g;
     if (n.type === 'chat') {
-      const r = 3.5 + 4.5 * Math.sqrt(n.s.size / biggest);
+      const r = 2.8 + 4 * Math.sqrt(n.s.size / biggest);
+      const tier = tierOf(n.s.updated);
       const sel = chatPick?.key === n.pr.key && chatPick?.id === n.s.id;
-      g = svg('g', { class: `mnode chat${n.pr.current ? ' here' : ''}${hit(n) ? '' : ' dim'}`, transform: at, tabindex: 0, role: 'button', 'aria-label': `${n.s.title}, ${n.pr.name}` },
+      g = svg('g', { class: `mnode chat t-${tier}${n.pr.current ? ' here' : ''}${hit(n) ? '' : ' dim'}`, transform: at, tabindex: 0, role: 'button', 'aria-label': `${n.s.title}, ${n.pr.name}`, style: `--d:${n._d}` },
         svg('title', {}, `${n.s.title}\n${n.pr.dir || n.pr.name} · ${stamp(n.s.updated)}`),
-        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: r.toFixed(1) }), sel ? svg('circle', { class: 'ring', r: (r + 4).toFixed(1) }) : null,
+        svg('circle', { class: 'halo', r: (r * 3.6).toFixed(1), fill: `url(#cg-${tier})` }),
+        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: r.toFixed(1) }), sel ? reticle(r + 7) : null,
         label(n, cut(n.s.title, 36)));
       g.addEventListener('click', () => { if (mapDragged) return; chatPick = { key: n.pr.key, id: n.s.id }; renderMap(); });
     } else if (n.type === 'more') {
-      g = svg('g', { class: 'mnode more', transform: at, tabindex: 0, role: 'button' },
+      g = svg('g', { class: 'mnode more', transform: at, tabindex: 0, role: 'button', style: `--d:${n._d}` },
         svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: 4 }), label(n, `+${n.count} more folders`));
       g.addEventListener('click', () => { if (mapDragged) return; n.parent.showAll = true; renderMap(); });
     } else {
       const below = chatsBelow(n);
       const current = samePath(n.path, S.project?.dir);
       const sel = chatPick?.folder === n.path;
-      g = svg('g', { class: `mnode dir${n.onPath ? ' path' : ''}${n.open ? ' open' : ''}${current ? ' current' : ''}${q && !hitsBelow(n) ? ' dim' : ''}`, transform: at, tabindex: 0, role: 'button', 'aria-label': n.path, 'aria-expanded': String(n.open) },
+      g = svg('g', { class: `mnode dir${n.onPath ? ' path' : ''}${n.open ? ' open' : ''}${current ? ' current' : ''}${q && !hitsBelow(n) ? ' dim' : ''}`, transform: at, tabindex: 0, role: 'button', 'aria-label': n.path, 'aria-expanded': String(n.open), style: `--d:${n._d}` },
         svg('title', {}, n.path),
-        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: n.onPath ? 5 : 4 }), sel ? svg('circle', { class: 'ring', r: 9 }) : null,
+        n.onPath ? svg('circle', { class: 'halo', r: 14, fill: 'url(#cg-cold)' }) : null,
+        svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'dot', r: n.onPath ? 4.5 : 3.5 }), sel ? reticle(11) : null,
         label(n, n.name, below ? svg('tspan', { class: 'cnt', dx: 6 }, current ? `${below} · this folder` : String(below)) : (current ? svg('tspan', { class: 'cnt', dx: 6 }, 'this folder') : null)));
       g.addEventListener('click', guard(async () => {
         if (mapDragged) return;
@@ -270,16 +301,57 @@ function renderMap() {
     return g;
   };
 
-  const center = svg('g', { class: 'map-center', tabindex: 0, role: 'button', 'aria-label': mapRoot.virtual ? 'This computer' : mapRoot.path },
-    svg('rect', { x: -58, y: -26, width: 116, height: 52, rx: 4 }),
-    svg('text', { y: -3 }, mapRoot.virtual ? 'This computer' : mapRoot.name),
-    svg('text', { class: 'count', y: 15 }, plural(all.length, 'chat')));
+  // the backdrop: orbits at every ring, turning slowly in turns, and a radar sweep
+  const depth = Math.round(mapRadius / RING);
+  const reach = mapRadius + 60;
+  const orbits = Array.from({ length: depth }, (_, i) => svg('circle', { class: `orbit${i % 2 ? ' alt' : ''}`, r: (i + 1) * RING }, spin(120 + i * 40, i % 2 === 1)));
+  const sweep = calm ? null : svg('g', { class: 'sweep' },
+    svg('path', { d: `M0 0L${reach} 0A${reach} ${reach} 0 0 0 ${(reach * Math.cos(-0.55)).toFixed(1)} ${(reach * Math.sin(-0.55)).toFixed(1)}Z`, fill: 'url(#cg-sweep)' }),
+    svg('line', { x1: 0, y1: 0, x2: reach, y2: 0 }), spin(9));
+
+  // signals running out along the synapses
+  const signals = [];
+  if (!calm) {
+    for (let i = routes.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [routes[i], routes[j]] = [routes[j], routes[i]]; }
+    for (const r of routes.slice(0, 44)) {
+      signals.push(svg('circle', { class: `sig${r.tier ? ` t-${r.tier}` : ''}`, r: 1.9 },
+        svg('animateMotion', { dur: `${(1.3 + Math.random() * 2).toFixed(2)}s`, begin: `${(Math.random() * 3.5).toFixed(2)}s`, repeatCount: 'indefinite', path: r.d })));
+    }
+  }
+
+  const hot = all.filter((s) => tierOf(s.updated) === 'hot').length;
+  const center = svg('g', { class: 'map-center core', tabindex: 0, role: 'button', 'aria-label': mapRoot.virtual ? 'This computer' : mapRoot.path },
+    svg('title', {}, mapRoot.virtual ? 'This computer' : mapRoot.path),
+    svg('circle', { class: 'aura', r: 140, fill: 'url(#cg-aura)' }),
+    svg('circle', { class: 'c-ring r1', r: 44 }, spin(14)),
+    svg('circle', { class: 'c-ring r2', r: 54 }, spin(24, true)),
+    svg('circle', { class: 'c-ring r3', r: 64 }, spin(46)),
+    svg('circle', { class: 'orb', r: 28, fill: 'url(#cg-core)' }, calm ? null : svg('animate', { attributeName: 'r', values: `28;${hot ? 33 : 30.5};28`, dur: hot ? '2.2s' : '3.6s', repeatCount: 'indefinite' })),
+    svg('text', { class: 'c-title', y: 90 }, 'MIND CORPUS'),
+    svg('text', { class: 'count', y: 107 }, `${all.length} memories · ${mapRoot.virtual ? 'this computer' : mapRoot.name}`));
   center.addEventListener('click', () => { if (mapDragged) return; chatPick = { folder: mapRoot.path }; renderMap(); });
 
-  const world = svg('g', { id: 'mapWorld' }, links, nodes.map(nodeEl), center);
-  $('mapSvg').replaceChildren(world);
+  const world = svg('g', { id: 'mapWorld', class: corpusBoot && !calm ? 'boot' : '' }, svg('g', { class: 'backdrop' }, orbits, sweep), links, svg('g', { class: 'signals' }, signals), nodes.map(nodeEl), center);
+  corpusBoot = false;
+  $('mapSvg').replaceChildren(corpusDefs(), world);
   applyView();
   renderChatDetail();
+}
+
+/** The readout in the corner of the corpus. */
+function renderCorpusHud(all) {
+  const count = Object.fromEntries(CORPUS_TIERS.map(([, k]) => [k, 0]));
+  for (const s of all) count[tierOf(s.updated)]++;
+  const bytes = all.reduce((sum, s) => sum + (s.size || 0), 0);
+  const newest = all.reduce((m, s) => Math.max(m, s.updated || 0), 0);
+  $('corpusHud').replaceChildren(
+    h('p', { class: 'hud-title' }, h('i', { class: 'live' }), 'Neural index online'),
+    h('dl', {},
+      h('dt', {}, 'Memories'), h('dd', {}, String(all.length)),
+      h('dt', {}, 'Clusters'), h('dd', {}, String(chatData.length)),
+      h('dt', {}, 'Mass'), h('dd', {}, kb(bytes)),
+      h('dt', {}, 'Last spark'), h('dd', {}, newest ? ago(newest) : '–')));
+  $('corpusLegend').replaceChildren(...CORPUS_TIERS.map(([, k, text]) => h('span', { class: `lg t-${k}` }, h('i'), `${text} `, h('b', {}, String(count[k])))));
 }
 
 function applyView() {
@@ -315,13 +387,15 @@ function renderChatDetail() {
   if (chatPick && 'folder' in chatPick) return renderFolderDetail(findFolder(mapRoot, chatPick.folder));
   const pr = chatData?.find((p) => p.key === chatPick?.key);
   const s = pr?.sessions.find((x) => x.id === chatPick.id);
-  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat or folder.'));
+  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'kicker' }, 'Awaiting signal'), h('p', { class: 'none' }, 'Pick a neuron to read its memory trace, or a cluster to see what it holds.'));
   const agent = S.agents.find((a) => a.sessionId === s.id);
   let action = null;
   if (pr.current && agent) action = h('button', { type: 'button', class: 'btn primary', onclick: () => openAgent(agent.id) }, 'Open its terminal');
   else if (pr.current) action = h('button', { type: 'button', class: 'btn primary', onclick: () => createAgent({ sessionId: s.id }) }, 'Continue here');
   else if (pr.dir) action = openFolderButton(pr.dir, pr.name);
+  const tier = tierOf(s.updated);
   $('mapDetail').replaceChildren(...[
+    h('p', { class: `kicker t-${tier}` }, h('i'), `Memory trace · ${CORPUS_TIERS.find(([, k]) => k === tier)[2]}`),
     h('h2', {}, s.title),
     h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, stamp(s.updated)), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
     s.firstPrompt && s.firstPrompt !== s.title ? h('div', {}, h('h3', {}, 'Began with'), h('p', { class: 'quote' }, s.firstPrompt)) : null,
@@ -338,10 +412,11 @@ function openFolderButton(dir, name) {
 }
 
 function renderFolderDetail(n) {
-  if (!n) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Pick a dot to see that chat or folder.'));
+  if (!n) return $('mapDetail').replaceChildren(h('p', { class: 'kicker' }, 'Awaiting signal'), h('p', { class: 'none' }, 'Pick a neuron to read its memory trace, or a cluster to see what it holds.'));
   const below = chatsBelow(n);
   const here = samePath(n.path, S.project?.dir);
   $('mapDetail').replaceChildren(...[
+    h('p', { class: 'kicker' }, h('i'), n.virtual ? 'Core' : 'Cluster'),
     h('h2', {}, n.virtual ? 'This computer' : n.name),
     n.virtual ? null : h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, n.path), h('dt', {}, 'Chats'), h('dd', {}, below ? `${below} in here and below` : 'none'), h('dt', {}, 'Subfolders'), h('dd', {}, n.loaded ? String(n.kids.size) : 'not opened yet')),
     n.chats.length ? h('div', {}, h('h3', {}, 'Chats in this folder'), h('ul', { class: 'map-list' }, n.chats.map((c) => h('li', {}, h('a', { onclick: () => { chatPick = { key: c.pr.key, id: c.s.id }; renderMap(); } }, c.s.title))))) : null,

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-you-get">What you get</a> ·
-  <a href="#every-chat-on-one-map">The map</a> ·
+  <a href="#every-chat-on-one-map-the-mind-corpus">Mind corpus</a> ·
   <a href="#shared-memory">Memory</a> ·
   <a href="#keyboard">Keyboard</a> ·
   <a href="#your-account">Account</a> ·
@@ -87,11 +87,11 @@ npm link
   </tr>
 </table>
 
-Colour only ever means state: green is working, amber needs you. The window follows your system's light or dark theme.
+In the Overview every agent is an animated pixel pet, so you see its state from how it moves (see [The pets](#the-pets)). The window follows your system's light or dark theme.
 
-## Every chat on one map
+## Every chat on one map: the mind corpus
 
-Click **ultraclaude** at the top left. Your drive sits in the middle, every folder on the way to a Claude Code chat spreads out around it, and each chat is a dot in the folder it was opened in. Click any folder to open it, scroll to zoom, drag to move. Pick a chat to continue it, or open its folder in its own UltraClaude window.
+Click **ultraclaude** at the top left to open the **mind corpus**. A glowing core sits in the middle with your drive behind it, every folder on the way to a Claude Code chat is a cluster around it, and each chat is a neuron in the folder it was opened in. Its colour tells how fresh the memory is: orange today, gold this week, cyan this month, violet older, and today's neurons pulse. Signals run along the synapses, orbits and a radar sweep turn behind it, and a HUD reads out how many memories, clusters and how much text it holds. When it opens, the synapses draw themselves outwards ring by ring. Click a cluster to open it, a neuron to read its memory trace, scroll to zoom, drag to move. Pick a chat to continue it, or open its folder in its own UltraClaude window. It holds still when your system asks for reduced motion.
 
 <p align="center">
   <img src="docs/map.gif" alt="The chat map: zooming into code, opening folders, picking a chat" width="100%">

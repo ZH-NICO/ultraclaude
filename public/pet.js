@@ -46,7 +46,7 @@ export function petSprite({ mini = false } = {}) {
     el('g', { class: 'pet-body' },
       el('g', { class: 'pet-arm l' }, el('path', { d: PATHS.a })),
       el('g', { class: 'pet-arm r' }, el('path', { d: PATHS.b })),
-      el('path', { class: 'pet-fill', d: PATHS.B }),
+      el('path', { class: 'pet-fill', d: PATHS.B + PATHS.E }), // solid under the eyes, so moving eyes leave no hole behind
       el('g', { class: 'pet-eyes' }, el('path', { d: PATHS.E })),
       el('g', { class: 'pet-shut' }, el('rect', { x: 3 * P + 1, y: 3 * P, width: 2 * P, height: 1.2 }), el('rect', { x: 10 * P + 1, y: 3 * P, width: 2 * P, height: 1.2 }))),
     // a little keyboard for typing
