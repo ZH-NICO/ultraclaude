@@ -209,13 +209,30 @@
       </header>
       <div class="chatmap brain">
         <div class="map-stage brain-stage" id="mapStage">
-          <canvas id="brainCanvas" role="img" aria-label="Every Claude Code chat on this computer as a point of light in a turning brain, one coloured region per folder"></canvas>
+          <canvas id="brainCanvas" role="img" aria-label="Every file and Claude Code chat on this computer as a point of light in a turning brain, one coloured region per main folder"></canvas>
           <nav class="brain-legend" id="brainLegend" aria-label="Regions"></nav>
+          <p class="brain-status" id="brainStatus" aria-live="polite"></p>
           <div class="brain-stats" id="brainStats"></div>
-          <p class="map-hint">Drag to turn · scroll to zoom · double-click to reset · click a point to open its chat</p>
+          <p class="map-hint">Drag to turn · scroll to zoom · double-click for everything · click a point to see that file or chat</p>
           <p class="map-empty" id="mapEmpty" hidden></p>
         </div>
-        <aside class="map-detail" id="mapDetail"></aside>
+        <aside class="map-detail brain-side">
+          <div class="side-tabs" id="sideTabs" role="tablist">
+            <button type="button" class="on" data-side="ask">Ask</button>
+            <button type="button" data-side="details">Details</button>
+          </div>
+          <section class="ask" id="brainAsk">
+            <div class="ask-log" id="askLog" aria-live="polite"></div>
+            <form class="ask-form" id="askForm">
+              <textarea id="askInput" rows="2" placeholder="Ask your brain, e.g. where are my tax documents?" aria-label="Ask your brain"></textarea>
+              <div class="ask-row">
+                <button type="button" class="link" id="askNew">New chat</button>
+                <button type="submit" class="btn primary" id="askSend">Send</button>
+              </div>
+            </form>
+          </section>
+          <section class="side-detail" id="mapDetail" hidden></section>
+        </aside>
       </div>
     </section>
 

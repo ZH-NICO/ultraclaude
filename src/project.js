@@ -23,7 +23,7 @@ const BROADCAST = ['all', 'everyone', '*'];
 let claudePath = null;
 
 /** Path of the Claude Code executable, or null when it is not installed. Looked up once, then remembered. */
-function resolveClaude() {
+export function resolveClaude() {
   if (process.env.ULTRACLAUDE_CLAUDE) return process.env.ULTRACLAUDE_CLAUDE;
   if (claudePath && fs.existsSync(claudePath)) return claudePath;
   try {
@@ -34,6 +34,19 @@ function resolveClaude() {
     claudePath = null;
   }
   return claudePath;
+}
+
+/**
+ * The environment for a Claude Code process started by UltraClaude. If UltraClaude itself runs inside a
+ * Claude Code session, that session's markers are not passed on (NO_COLOR among them, which Claude Code sets
+ * for its own tool shells and which would turn every terminal monochrome).
+ */
+export function claudeEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  const markers = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID'];
+  if (markers.some((k) => k in env)) delete env.NO_COLOR;
+  for (const k of markers) delete env[k];
+  return env;
 }
 
 const base = (f) => (f ? String(f).split(/[\\/]/).pop() : '');
@@ -238,13 +251,7 @@ export class Project extends EventEmitter {
       ...(a.permissionMode ? ['--permission-mode', a.permissionMode] : []),
       ...(a.worktree ? ['--worktree', `uc-${a.id}`] : []),
     ];
-    const env = { ...process.env, ULTRACLAUDE_HOOK_URL: `http://127.0.0.1:${port}/hook/${token}/${a.id}`, ULTRACLAUDE_AGENT: a.name };
-    // If UltraClaude itself was launched from inside a Claude Code session, don't pass that session's
-    // markers on. That includes NO_COLOR, which Claude Code sets for its own tool shells and which would
-    // turn every agent's terminal monochrome.
-    const markers = ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SSE_PORT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'CLAUDE_PID'];
-    if (markers.some((k) => k in env)) delete env.NO_COLOR;
-    for (const k of markers) delete env[k];
+    const env = claudeEnv({ ULTRACLAUDE_HOOK_URL: `http://127.0.0.1:${port}/hook/${token}/${a.id}`, ULTRACLAUDE_AGENT: a.name });
     env.COLORTERM ||= 'truecolor'; // the terminal in the window supports 24-bit colour
     // Claude Code's fullscreen rendering keeps the prompt pinned at the bottom while the chat scrolls
     // above it. Claude Code does not recognise this terminal and would fall back to inline rendering,

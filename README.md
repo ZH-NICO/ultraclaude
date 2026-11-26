@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#what-you-get">What you get</a> ·
-  <a href="#every-chat-in-one-brain">Brain</a> ·
+  <a href="#your-whole-computer-in-one-brain">Brain</a> ·
   <a href="#shared-memory">Memory</a> ·
   <a href="#keyboard">Keyboard</a> ·
   <a href="#your-account">Account</a> ·
@@ -89,9 +89,13 @@ npm link
 
 In the Overview every agent is an animated pixel pet, so you see its state from how it moves (see [The pets](#the-pets)). The window follows your system's light or dark theme.
 
-## Every chat in one brain
+## Your whole computer in one brain
 
-Click **ultraclaude** at the top left to open your **brain**: every Claude Code chat on this computer as a point of light in a slowly turning 3D brain, with its cerebrum, cerebellum and stem. Thousands of small points form the shape, coloured in one spectrum that runs round it. Each folder you used Claude Code in is a region of that spectrum, listed on the left with its count, and each chat is a brighter neuron in its region; today's pulse, and now and then a few neurons of a region fire together. When it opens, the brain builds itself from the stem upwards. Drag to turn it, scroll to zoom, double-click to reset. Hover a point to see the chat, click it to read it and continue it, or click a region to light up only that folder. Search lights up what matches. It holds still when your system asks for reduced motion. Inspired by the look of [mindcorpus.org](https://mindcorpus.org/); drawn by UltraClaude itself, without any of its code or assets.
+Click **ultraclaude** at the top left to open your **brain**: every file on this computer as a point of light in a slowly turning 3D brain, with its cerebrum, cerebellum and stem, and every Claude Code chat as a brighter neuron among the files of its folder. The first time it opens, UltraClaude reads the **names** of your files in the background (never their contents; the system, installed programs, app data, hidden folders and `node_modules` are left out; up to 400,000 files, of which up to 40,000 are drawn). Each main folder (Documents, Downloads, your code, …) is a region with its own stretch of the spectrum, listed on the left with its count. The brain builds itself from the stem upwards, today's chats pulse, and now and then a few neurons of a region fire together. Drag to turn it, scroll to zoom, double-click for everything. Hover a point to see the file or chat; click it to open its folder, continue the chat, or ask about it.
+
+**Ask your brain.** Next to it is a Claude chat that knows the names of all your files. Ask where something is ("where are my tax documents?"), what a folder holds, or let it sort a folder. It runs through your own Claude Code login. It can search the index, list folders, read a file when its content matters, and fly the brain to what it talks about, so you see it light up. It cannot run commands, write or delete. To sort, it proposes a plan of moves; nothing moves until you press **Apply**, nothing is ever overwritten, and **Undo** puts everything back.
+
+Inspired by the look of [mindcorpus.org](https://mindcorpus.org/); drawn by UltraClaude itself, without any of its code or assets. It holds still when your system asks for reduced motion.
 
 <p align="center">
   <img src="docs/brain.gif" alt="The brain: a turning 3D cloud of light in the shape of a brain, coloured by folder, building itself from the stem upwards" width="70%">

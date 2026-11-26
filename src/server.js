@@ -20,6 +20,8 @@ import { usageReport } from './usage.js';
 import { Guard } from './guard.js';
 import * as git from './git.js';
 import { missionViews, startMission, stopMission } from './missions.js';
+import { FileIndex } from './fileindex.js';
+import { BrainChat } from './brainchat.js';
 
 const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
@@ -121,6 +123,14 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   // the cost guard lives next to the accounts, so tests with their own accounts file get their own guard
   const costGuard = new Guard({ file: path.join(path.dirname(usersFile), 'guard.json'), project, report: () => usageReport({ range: 'today', blockLimit: costGuard.config.limit }) });
   costGuard.on('change', (guard) => broadcast({ t: 'guard', guard }));
+  // the brain: an index of all file names on this computer, and a Claude chat that finds and sorts them
+  const fileIndex = new FileIndex({ journal: path.join(path.dirname(usersFile), 'brain-moves.jsonl') });
+  const brainChat = new BrainChat({ index: fileIndex, endpoint: () => project.endpoint, dataDir: project.dataDir });
+  fileIndex.on('status', (status) => broadcast({ t: 'brainindex', status }));
+  brainChat.on('item', (item) => broadcast({ t: 'brainchat', item }));
+  brainChat.on('busy', (busy) => broadcast({ t: 'brainbusy', busy }));
+  brainChat.on('reset', () => broadcast({ t: 'brainreset' }));
+  brainChat.on('show', (show) => broadcast({ t: 'brainshow', ...show }));
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY, ...headers });
@@ -199,6 +209,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     if (closing) return;
     closing = true;
     clearInterval(guardTimer);
+    brainChat.stop();
     project.stopAll();
     project.saveNow();
     for (const ws of clients) ws.terminate();
@@ -229,6 +240,36 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       if (route === 'POST /api/changes/commit') { await git.commitAll(project.dir, b.path, b.message); project.event('git', 'user', `committed in ${path.basename(String(b.path))}: ${b.message || 'Work from UltraClaude'}`); return send(res, 200, { ok: true }); }
       if (route === 'POST /api/changes/merge') { const r = await git.merge(project.dir, b.path); project.event('git', 'user', `merged ${path.basename(String(b.path))} into ${r.into}`); return send(res, 200, r); }
       if (route === 'POST /api/changes/pr') { const r = await git.pullRequest(project.dir, b.path); project.event('git', 'user', `opened a pull request: ${r.url}`); return send(res, 200, r); }
+      return send(res, 404, { error: 'Not found' });
+    }
+    if (url.pathname === '/api/brain' || url.pathname.startsWith('/api/brain/')) {
+      if (route === 'GET /api/brain') {
+        if (fileIndex.state === 'idle') fileIndex.build(); // the first look starts the walk in the background
+        return send(res, 200, fileIndex.state === 'ready' ? fileIndex.payload() : fileIndex.status());
+      }
+      if (route === 'GET /api/brain/chat') return send(res, 200, brainChat.view());
+      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
+      const b = await readBody(req);
+      if (route === 'POST /api/brain/rescan') { if (fileIndex.state !== 'indexing') fileIndex.build(); return send(res, 200, fileIndex.status()); }
+      if (route === 'POST /api/brain/chat') {
+        const problem = brainChat.problem(b.text);
+        if (problem) return send(res, 400, { error: problem });
+        brainChat.send(b.text).catch((err) => project.event('error', 'Brain', err.message));
+        return send(res, 200, { ok: true });
+      }
+      if (route === 'POST /api/brain/chat/new') { brainChat.reset(); return send(res, 200, { ok: true }); }
+      const plan = /^\/api\/brain\/plans\/([0-9a-f-]+)\/(apply|discard|undo)$/.exec(url.pathname);
+      if (req.method === 'POST' && plan) {
+        const p = plan[2] === 'discard' ? brainChat.discard(plan[1]) : await brainChat[plan[2]](plan[1]);
+        if (plan[2] !== 'discard') project.event('memory', 'user', `${plan[2] === 'apply' ? 'sorted' : 'put back'} ${p.moves.length} ${p.moves.length === 1 ? 'file' : 'files'} in the brain`, { op: 'write' });
+        return send(res, 200, p);
+      }
+      if (route === 'POST /api/brain/open') {
+        const target = String(b.path || '');
+        if (!fileIndex.allowed(target) || !fs.existsSync(target)) return send(res, 400, { error: 'That is not a file the brain knows.' });
+        openExternal(fs.statSync(target).isDirectory() ? target : path.dirname(target));
+        return send(res, 200, { ok: true });
+      }
       return send(res, 404, { error: 'Not found' });
     }
     if (route === 'POST /api/missions' || /^\/api\/missions\/[0-9a-f]+\/stop$/.test(url.pathname)) {
@@ -361,7 +402,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         if (parts[1] !== token) return send(res, 403, { error: 'Forbidden' });
         if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
         const body = await readBody(req);
-        const out = parts[0] === 'hook' ? project.handleHook(parts[2], body) : handleMcp(project, parts[2], body);
+        const out = parts[0] === 'hook' ? project.handleHook(parts[2], body) : parts[2] === 'brain' ? brainChat.mcp(body) : handleMcp(project, parts[2], body);
         return out ? send(res, 200, out) : send(res, parts[0] === 'mcp' ? 202 : 200);
       }
       if (parts[0] === 'api') {

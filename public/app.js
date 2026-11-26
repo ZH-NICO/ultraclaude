@@ -82,34 +82,49 @@ function setView(view) {
   if (view !== 'replay') rpPause();
 }
 
-// ---------- brain: every chat on this computer ----------
-// A turning 3D cloud of light shaped like a brain. Each folder with Claude Code chats is a region in
-// its own colour, each chat a neuron in it. Drag turns it, the wheel zooms, a neuron opens its chat.
+// ---------- brain: every file and chat on this computer ----------
+// A turning 3D cloud of light shaped like a brain. Every file is a point in the region of its main folder,
+// every Claude Code chat a brighter neuron. Next to it, a Claude chat that finds, shows and sorts files.
 
 let chatData = null;
-let chatPick = null; // { key, id } for a chat, { region } for a folder
+let chatPick = null; // { key, id } for a chat, { region } for a region, { file } for a file
 let brain = null;
+let brainFiles = null; // the index from the server, once it is built
+let brainIndex = { state: 'idle', files: 0 };
+const ask = { items: [], busy: false };
 
 const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
 const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const samePath = (a, b) => !!a && !!b && a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase();
+const num = (n) => Number(n).toLocaleString('en-GB');
+const fileBase = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
+const dirName = (p) => String(p).replace(/[\\/][^\\/]*$/, '');
 
 const loadChats = guard(async () => {
   if (!brain) {
-    brain = new BrainView($('brainCanvas'), { calm, onPick: (n) => { chatPick = { key: n.pr.key, id: n.s.id }; syncBrain(); } });
+    brain = new BrainView($('brainCanvas'), {
+      calm,
+      onPick: (n) => { chatPick = { key: n.pr.key, id: n.s.id }; setSide('details'); syncBrain(); },
+      onPickFile: (p) => { chatPick = { file: p }; setSide('details'); renderChatDetail(); },
+    });
     $('brainCanvas').view = brain; // lets the browser tests find a point on screen
     new ResizeObserver(() => { if (S.view === 'map') brain.draw(); }).observe($('mapStage'));
   }
-  try {
-    chatData = (await api('GET', '/api/chats')).projects;
-  } catch {
+  const [chats, files, talk] = await Promise.all([
+    api('GET', '/api/chats').catch(() => null),
+    api('GET', '/api/brain').catch(() => null),
+    api('GET', '/api/brain/chat').catch(() => null),
+  ]);
+  if (!chats) {
     chatData = [];
-    brain.setData([]);
     $('mapEmpty').hidden = false;
-    setText($('mapEmpty'), 'The UltraClaude server behind this window is older than the window and cannot list chats yet. Run “ultraclaude” in this folder to update it.');
+    setText($('mapEmpty'), 'The UltraClaude server behind this window is older than the window and cannot show the brain yet. Run “ultraclaude” in this folder to update it.');
     return;
   }
-  brain.setData(chatData);
+  chatData = chats.projects;
+  if (files) { brainIndex = files; brainFiles = files.files ? files : null; }
+  if (talk) { ask.items = talk.items; ask.busy = talk.busy; renderAsk(); }
+  brain.setData(chatData, brainFiles);
   if (!chatPick) {
     const newest = chatData.flatMap((pr) => pr.sessions.map((s) => ({ pr, s }))).sort((a, b) => b.s.updated - a.s.updated)[0];
     if (newest) chatPick = { key: newest.pr.key, id: newest.s.id };
@@ -118,49 +133,100 @@ const loadChats = guard(async () => {
   if (S.view === 'map') brain.start();
 });
 
+/** The index changed (built, rebuilt or files moved): draw it anew. */
+const reloadFiles = guard(async () => {
+  const files = await api('GET', '/api/brain');
+  brainIndex = files;
+  brainFiles = files.files ? files : null;
+  if (brain && chatData) { brain.setData(chatData, brainFiles); syncBrain(); }
+});
+
 function syncBrain() {
   if (!chatData || !brain?.model) return;
   const all = chatData.flatMap((pr) => pr.sessions);
-  setText($('mapSummary'), `${all.length} ${all.length === 1 ? 'memory' : 'memories'} · ${plural(chatData.length, 'region')}`);
-  $('mapEmpty').hidden = all.length > 0;
-  if (!all.length) setText($('mapEmpty'), 'Nothing in here yet. Every Claude Code chat on this computer lights up here.');
+  const files = brainFiles ? brainIndex.total : 0;
+  setText($('mapSummary'), files ? `${num(files)} files · ${all.length} ${all.length === 1 ? 'chat' : 'chats'} · ${plural(brain.model.regions.length, 'region')}` : `${all.length} ${all.length === 1 ? 'chat' : 'chats'} · ${plural(brain.model.regions.length, 'region')}`);
+  $('mapEmpty').hidden = all.length > 0 || !!files || brainIndex.state === 'indexing';
+  if (!$('mapEmpty').hidden) setText($('mapEmpty'), 'Nothing in here yet.');
   const q = $('mapFilter').value.trim().toLowerCase();
   brain.match = q ? (n) => `${n.s.title} ${n.s.firstPrompt} ${n.pr.name}`.toLowerCase().includes(q) : null;
   brain.focus = chatPick?.region || null;
-  brain.selected = chatPick?.id ? `${chatPick.key}/${chatPick.id}` : null;
+  if (chatPick?.id) brain.selected = `${chatPick.key}/${chatPick.id}`;
+  else if (!chatPick?.file) brain.selected = null;
   const hits = q ? brain.model.neurons.filter(brain.match).length : 0;
   $('brainLegend').replaceChildren(...brain.model.regions.map((r) => h('button', {
-    type: 'button', class: `region${brain.focus === r.key ? ' on' : ''}${brain.focus && brain.focus !== r.key ? ' off' : ''}`, style: `--rc:${r.color}`, title: r.pr.dir || r.pr.name,
-    onclick: () => { chatPick = chatPick?.region === r.key ? null : { region: r.key }; syncBrain(); },
-  }, h('i'), h('span', {}, r.pr.name), h('b', {}, String(r.neurons.length)))));
-  const bytes = all.reduce((sum, s) => sum + (s.size || 0), 0);
-  $('brainStats').replaceChildren(
-    h('p', {}, h('b', {}, q ? String(hits) : String(all.length)), q ? ` of ${all.length} match` : ` ${all.length === 1 ? 'memory' : 'memories'}`),
-    h('p', {}, h('b', {}, String(chatData.length)), ` ${chatData.length === 1 ? 'region' : 'regions'}`),
-    h('p', {}, h('b', {}, kb(bytes)), ' of thought'));
+    type: 'button', class: `region${brain.focus === r.key ? ' on' : ''}${brain.focus && brain.focus !== r.key ? ' off' : ''}`, style: `--rc:${r.color}`, title: r.path || r.name,
+    onclick: () => { chatPick = chatPick?.region === r.key ? null : { region: r.key }; if (chatPick) setSide('details'); syncBrain(); },
+  }, h('i'), h('span', {}, r.name), h('b', {}, num(r.count)))));
+  $('brainStats').replaceChildren(...[
+    files ? h('p', {}, h('b', {}, num(files)), ' files') : null,
+    h('p', {}, h('b', {}, q ? String(hits) : String(all.length)), q ? ` of ${all.length} chats match` : ` ${all.length === 1 ? 'chat' : 'chats'}`),
+    h('p', {}, h('b', {}, String(brain.model.regions.length)), ` ${brain.model.regions.length === 1 ? 'region' : 'regions'}`),
+  ].filter(Boolean));
+  syncBrainStatus();
   if (!brain.running) brain.draw();
   renderChatDetail();
 }
 
+/** The line at the top: the index being built, or what the chat lit up. */
+function syncBrainStatus(label) {
+  const el = $('brainStatus');
+  if (brainIndex.state === 'indexing') {
+    el.replaceChildren(h('i', { class: 'spin' }), `Reading the names of your files… ${num(brainIndex.total ?? brainIndex.files)} so far`);
+  } else if (brain?.lit) {
+    el.replaceChildren(`Showing ${num(brain.lit.size)} ${brain.lit.size === 1 ? 'file' : 'files'}${label || el.dataset.label ? ` · ${label || el.dataset.label}` : ''} `, h('button', { type: 'button', class: 'link', onclick: () => { brain.overview(); el.dataset.label = ''; syncBrainStatus(); } }, 'Show everything'));
+    if (label) el.dataset.label = label;
+  } else if (brainFiles) {
+    el.replaceChildren(`${num(brainIndex.total)} files${brainIndex.truncated ? ' (the first ones; there are more)' : ''}${brainFiles.shown < brainIndex.total ? `, ${num(brainFiles.shown)} drawn` : ''} · `, h('button', { type: 'button', class: 'link', onclick: guard(async () => { await api('POST', '/api/brain/rescan', {}); }) }, 'Read again'));
+  } else {
+    el.replaceChildren();
+  }
+}
+
+function setSide(which) {
+  for (const b of $('sideTabs').children) b.classList.toggle('on', b.dataset.side === which);
+  $('brainAsk').hidden = which !== 'ask';
+  $('mapDetail').hidden = which !== 'details';
+  if (which === 'ask') { const log = $('askLog'); log.scrollTop = log.scrollHeight; }
+}
+
+function askAbout(text) {
+  setSide('ask');
+  $('askInput').value = text;
+  $('askInput').focus();
+}
+
 function renderChatDetail() {
-  if (chatPick?.region) return renderRegionDetail(chatData?.find((p) => p.key === chatPick.region));
+  if (chatPick?.file) return renderFileDetail(chatPick.file);
+  if (chatPick?.region) return renderRegionDetail(brain?.model?.regions.find((r) => r.key === chatPick.region));
   const pr = chatData?.find((p) => p.key === chatPick?.key);
   const s = pr?.sessions.find((x) => x.id === chatPick.id);
-  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to open that chat, or a region on the left.'));
-  const color = brain?.model?.regions.find((r) => r.key === pr.key)?.color;
+  if (!s) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to see that file or chat, or a region on the left.'));
+  const color = brain?.model?.neurons.find((n) => n.s.id === s.id)?.reg.color;
   const agent = S.agents.find((a) => a.sessionId === s.id);
   let action = null;
   if (pr.current && agent) action = h('button', { type: 'button', class: 'btn primary', onclick: () => openAgent(agent.id) }, 'Open its terminal');
   else if (pr.current) action = h('button', { type: 'button', class: 'btn primary', onclick: () => createAgent({ sessionId: s.id }) }, 'Continue here');
   else if (pr.dir) action = openFolderButton(pr.dir, pr.name);
   $('mapDetail').replaceChildren(...[
-    h('p', { class: 'kicker', style: `--rc:${color}` }, h('i'), pr.name),
+    h('p', { class: 'kicker', style: `--rc:${color}` }, h('i'), `Chat · ${pr.name}`),
     h('h2', {}, s.title),
     h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.name), h('dt', {}, 'Last active'), h('dd', {}, `${stamp(s.updated)} · ${ago(s.updated)}`), h('dt', {}, 'Length'), h('dd', {}, kb(s.size))),
     s.firstPrompt && s.firstPrompt !== s.title ? h('div', {}, h('h3', {}, 'Began with'), h('p', { class: 'quote' }, s.firstPrompt)) : null,
     action,
     pr.current ? null : h('p', { class: 'none' }, 'Chats from other folders continue in that folder’s own UltraClaude window.'),
   ].filter(Boolean));
+}
+
+function renderFileDetail(p) {
+  const reg = brain?.model?.regions.find((r) => r.path && (samePath(dirName(p), r.path) || p.toLowerCase().startsWith(`${r.path.toLowerCase()}${p.includes('\\') ? '\\' : '/'}`)));
+  $('mapDetail').replaceChildren(
+    h('p', { class: 'kicker', style: `--rc:${reg?.color || '#fff'}` }, h('i'), `File${reg ? ` · ${reg.name}` : ''}`),
+    h('h2', {}, fileBase(p)),
+    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, dirName(p))),
+    h('div', { class: 'row-btns' },
+      h('button', { type: 'button', class: 'btn primary', onclick: guard(() => api('POST', '/api/brain/open', { path: p })) }, 'Show in folder'),
+      h('button', { type: 'button', class: 'btn', onclick: () => askAbout(`What is "${p}" and where does it belong?`) }, 'Ask about it')));
 }
 
 function openFolderButton(dir, name) {
@@ -170,17 +236,82 @@ function openFolderButton(dir, name) {
   }) }, 'Open folder in UltraClaude');
 }
 
-function renderRegionDetail(pr) {
-  if (!pr) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to open that chat, or a region on the left.'));
-  const color = brain?.model?.regions.find((r) => r.key === pr.key)?.color;
-  const here = samePath(pr.dir, S.project?.dir);
+function renderRegionDetail(r) {
+  if (!r) return $('mapDetail').replaceChildren(h('p', { class: 'none' }, 'Turn the brain and pick a point to see that file or chat, or a region on the left.'));
   $('mapDetail').replaceChildren(...[
-    h('p', { class: 'kicker', style: `--rc:${color}` }, h('i'), 'Region'),
-    h('h2', {}, pr.name),
-    h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, pr.dir || pr.key), h('dt', {}, 'Chats'), h('dd', {}, String(pr.sessions.length)), h('dt', {}, 'Last active'), h('dd', {}, ago(pr.updated))),
-    h('div', {}, h('h3', {}, 'Chats in this region'), h('ul', { class: 'map-list' }, pr.sessions.map((s) => h('li', {}, h('a', { onclick: () => { chatPick = { key: pr.key, id: s.id }; syncBrain(); } }, s.title))))),
-    here ? h('p', { class: 'none' }, 'This window already belongs to this folder.') : pr.dir ? openFolderButton(pr.dir, pr.name) : null,
+    h('p', { class: 'kicker', style: `--rc:${r.color}` }, h('i'), 'Region'),
+    h('h2', {}, r.name),
+    h('dl', {}, r.path ? h('dt', {}, 'Folder') : null, r.path ? h('dd', { class: 'mono' }, r.path) : null, h('dt', {}, brainFiles ? 'Files' : 'Chats'), h('dd', {}, num(r.count)), h('dt', {}, 'Chats'), h('dd', {}, String(r.neurons.length))),
+    r.neurons.length ? h('div', {}, h('h3', {}, 'Chats in this region'), h('ul', { class: 'map-list' }, r.neurons.map((n) => h('li', {}, h('a', { onclick: () => { chatPick = { key: n.pr.key, id: n.s.id }; syncBrain(); } }, n.s.title))))) : null,
+    h('div', { class: 'row-btns' },
+      brainFiles && r.path ? h('button', { type: 'button', class: 'btn primary', onclick: guard(() => api('POST', '/api/brain/open', { path: r.path })) }, 'Show in folder') : null,
+      brainFiles && r.path ? h('button', { type: 'button', class: 'btn', onclick: () => askAbout(`Look at ${r.path} and suggest how to sort it.`) }, 'Ask how to sort it') : null),
   ].filter(Boolean));
+}
+
+// ---------- the brain chat ----------
+
+const SUGGESTIONS = ['Where are my tax documents?', 'What is taking up my Downloads folder?', 'Sort my Downloads folder', 'Find the photos from my phone'];
+
+/** Plain text with `code` and line breaks, safely as DOM nodes. */
+function richText(text) {
+  return String(text).split(/\n{2,}/).map((para) => h('p', {}, ...para.split('\n').flatMap((line, i) => [i ? h('br') : null, ...line.split(/(`[^`]+`)/).map((part) => (part.startsWith('`') && part.endsWith('`') && part.length > 2 ? h('code', {}, part.slice(1, -1)) : part))]).filter((x) => x !== null)));
+}
+
+function planCard(it) {
+  const shown = it.moves.slice(0, 12);
+  const act = (what) => guard(async () => { await api('POST', `/api/brain/plans/${it.id}/${what}`, {}); if (what !== 'discard') reloadFiles(); });
+  return h('div', { class: `plan ${it.state}` },
+    h('p', { class: 'plan-head' }, h('b', {}, `${it.moves.length} ${it.moves.length === 1 ? 'move' : 'moves'}`), ` · ${{ pending: 'waiting for you', applied: 'done', discarded: 'discarded', undone: 'undone' }[it.state]}`),
+    it.reason ? h('p', { class: 'plan-why' }, it.reason) : null,
+    h('ul', {}, ...shown.map((m) => h('li', { title: `${m.from}\n→ ${m.to}` }, h('span', {}, fileBase(m.from)), h('i', {}, '→'), h('span', {}, dirName(m.to).split(/[\\/]/).slice(-2).join('/'))))),
+    it.moves.length > shown.length ? h('p', { class: 'fine' }, `and ${it.moves.length - shown.length} more`) : null,
+    it.failed?.length ? h('p', { class: 'form-error' }, `${it.failed.length} could not be moved: ${it.failed.slice(0, 2).map((f) => f.error).join('; ')}`) : null,
+    h('div', { class: 'row-btns' },
+      h('button', { type: 'button', class: 'btn', onclick: () => { brain?.show(it.moves.map((m) => (it.state === 'applied' ? m.to : m.from))); syncBrainStatus('the plan'); } }, 'Show'),
+      it.state === 'pending' ? h('button', { type: 'button', class: 'btn primary', onclick: act('apply') }, `Apply ${it.moves.length} ${it.moves.length === 1 ? 'move' : 'moves'}`) : null,
+      it.state === 'pending' ? h('button', { type: 'button', class: 'btn', onclick: act('discard') }, 'Discard') : null,
+      it.state === 'applied' ? h('button', { type: 'button', class: 'btn', onclick: act('undo') }, 'Undo') : null));
+}
+
+function askItem(it) {
+  if (it.kind === 'user') return h('div', { class: 'msg user' }, ...richText(it.text));
+  if (it.kind === 'text') return h('div', { class: 'msg bot' }, ...richText(it.text));
+  if (it.kind === 'action') return h('button', { type: 'button', class: 'chip', title: 'Show these in the brain', onclick: () => { if (brain?.show(it.paths)) syncBrainStatus(it.text); } }, h('i'), it.text);
+  if (it.kind === 'tool') return h('p', { class: 'tool' }, it.text);
+  if (it.kind === 'error') return h('p', { class: 'msg error' }, it.text);
+  if (it.kind === 'plan') return planCard(it);
+  return null;
+}
+
+function renderAsk() {
+  const log = $('askLog');
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  const kids = ask.items.map(askItem).filter(Boolean);
+  if (!kids.length) {
+    kids.push(h('div', { class: 'ask-hello' },
+      h('h3', {}, 'Ask your brain'),
+      h('p', {}, 'Claude knows the names of all your files. Ask where something is, what a folder holds, or let it sort a folder: you see every move and decide.'),
+      h('div', { class: 'sugs' }, ...SUGGESTIONS.map((s) => h('button', { type: 'button', class: 'chip', onclick: () => sendAsk(s) }, s)))));
+  }
+  if (ask.busy) kids.push(h('p', { class: 'thinking' }, h('i'), h('i'), h('i'), ' thinking'));
+  log.replaceChildren(...kids);
+  if (stick || ask.busy) log.scrollTop = log.scrollHeight;
+  $('askSend').disabled = ask.busy;
+}
+
+const sendAsk = guard(async (text) => {
+  const body = String(text ?? $('askInput').value).trim();
+  if (!body) return;
+  setSide('ask');
+  await api('POST', '/api/brain/chat', { text: body });
+  $('askInput').value = '';
+});
+
+function onBrainChat(item) {
+  const i = ask.items.findIndex((x) => x.id === item.id);
+  if (i >= 0) ask.items[i] = item; else ask.items.push(item);
+  renderAsk();
 }
 
 function openAgent(id) {
@@ -1087,6 +1218,11 @@ function connect() {
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
     else if (m.t === 'guard') renderGuard(m.guard);
     else if (m.t === 'missions') renderMissions(m.missions);
+    else if (m.t === 'brainindex') { const was = brainIndex.state; brainIndex = { ...brainIndex, ...m.status, total: m.status.files }; if (m.status.state === 'ready' && (was !== 'ready' || !brainFiles)) reloadFiles(); else syncBrainStatus(); }
+    else if (m.t === 'brainchat') onBrainChat(m.item);
+    else if (m.t === 'brainbusy') { ask.busy = m.busy; renderAsk(); }
+    else if (m.t === 'brainreset') { ask.items = []; renderAsk(); }
+    else if (m.t === 'brainshow') { if (brain && S.view === 'map' && brain.show(m.paths)) syncBrainStatus(m.label); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
   ws.onclose = (ev) => {
@@ -1884,6 +2020,10 @@ $('updateBtn').addEventListener('click', guard(async () => {
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
 }));
 $('mapFilter').addEventListener('input', () => syncBrain());
+$('sideTabs').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-side]'); if (b) setSide(b.dataset.side); });
+$('askForm').addEventListener('submit', (ev) => { ev.preventDefault(); sendAsk(); });
+$('askInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendAsk(); } });
+$('askNew').addEventListener('click', guard(async () => { await api('POST', '/api/brain/chat/new', {}); }));
 $('noteFilter').addEventListener('input', renderNotes);
 $('sessionsMore').addEventListener('click', () => { S.allSessions = !S.allSessions; renderSessions(); });
 $('openObsidian').addEventListener('click', () => openInObsidian(S.note)); // the open note, or the project folder
