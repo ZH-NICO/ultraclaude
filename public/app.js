@@ -3,6 +3,7 @@ const TOKEN = new URLSearchParams(location.search).get('t') || '';
 const $ = (id) => document.getElementById(id);
 import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
 import { layout, degrees, dotSize, panZoom } from './graph.js';
+import { petSprite, petPlace, petMood } from './pet.js';
 
 const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay', 'changes', 'missions'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
@@ -515,7 +516,9 @@ function buildGraph(w, ht) {
     const side = Math.abs(cos) > 0.4 ? (cos > 0 ? 'right' : 'left') : sin > 0 ? 'bottom' : 'top';
     const anchor = side === 'right' ? 'start' : side === 'left' ? 'end' : 'middle';
     const nd = { side, compact, title: svg('title'), nm: svg('text', { class: 'nm', 'text-anchor': anchor }), what: svg('text', { class: 'what', 'text-anchor': anchor }), now: svg('text', { class: 'now', 'text-anchor': anchor }) };
-    nd.g = svg('g', { transform: `translate(${p.x},${p.y})`, tabindex: 0, role: 'button' }, nd.title, svg('circle', { class: 'hit', r: 18 }), svg('circle', { class: 'mark', r: 6 }), nd.nm, nd.what, nd.now);
+    nd.pet = petSprite();
+    petPlace(nd.pet, side);
+    nd.g = svg('g', { transform: `translate(${p.x},${p.y})`, tabindex: 0, role: 'button' }, nd.title, svg('circle', { class: 'hit', r: 34 }), nd.pet, nd.nm, nd.what, nd.now);
     nd.g.addEventListener('click', () => openAgent(a.id));
     nd.g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openAgent(a.id); } });
     gnodes.set(a.id, nd);
@@ -534,7 +537,11 @@ function buildGraph(w, ht) {
 function updateNode(a) {
   const nd = gnodes.get(a.id);
   if (!nd) return;
-  setAttr(nd.g, 'class', `g-node ${a.state}`);
+  // a turn that just ended gets a short celebration
+  if (nd.prev === 'working' && a.state === 'idle' && !calm) { nd.happyUntil = Date.now() + 1600; setTimeout(() => { const cur = agentBy(a.id); if (cur) updateNode(cur); }, 1650); }
+  nd.prev = a.state;
+  const happy = nd.happyUntil > Date.now() ? ' happy' : '';
+  setAttr(nd.g, 'class', `g-node ${a.state} mood-${petMood(a)}${happy}`);
   const lines = [[nd.nm, cut(a.name, 26)]];
   if (!nd.compact) {
     if (busy(a) && a.statusText) lines.push([nd.what, cut(a.statusText, 36)]);
@@ -545,9 +552,9 @@ function updateNode(a) {
   lines.forEach(([el, text], i) => {
     let x = 0;
     let y;
-    if (nd.side === 'right' || nd.side === 'left') { x = nd.side === 'right' ? 16 : -16; y = (i - (lines.length - 1) / 2) * lineHeight + 4; }
-    else if (nd.side === 'bottom') y = 27 + i * lineHeight;
-    else y = -17 - (lines.length - 1 - i) * lineHeight;
+    if (nd.side === 'right' || nd.side === 'left') { x = nd.side === 'right' ? 38 : -38; y = (i - (lines.length - 1) / 2) * lineHeight + 4; }
+    else if (nd.side === 'bottom') y = 42 + i * lineHeight;
+    else y = -30 - (lines.length - 1 - i) * lineHeight;
     setText(el, text);
     setAttr(el, 'x', x);
     setAttr(el, 'y', y);
@@ -642,13 +649,13 @@ function placeSub(n, at) {
   setAttr(n.line, 'x2', at.x);
   setAttr(n.line, 'y2', at.y);
   const right = at.labelSide === 'right';
-  for (const el of [n.nm, n.what]) { setAttr(el, 'x', right ? 10 : -10); setAttr(el, 'text-anchor', right ? 'start' : 'end'); }
+  for (const el of [n.nm, n.what]) { setAttr(el, 'x', right ? 16 : -16); setAttr(el, 'text-anchor', right ? 'start' : 'end'); }
 }
 
 function openSub({ a, s, from, at }, layer, animated) {
   const line = svg('line', { class: 'g-sublink', x1: from.x, y1: from.y, x2: at.x, y2: at.y });
   const n = { line, from, at, title: svg('title'), nm: svg('text', { class: 'snm', y: -1 }, cut(s.label, 26)), what: svg('text', { class: 'swhat', y: 12 }) };
-  n.inner = svg('g', { class: 'g-sub-in' }, svg('circle', { class: 'hit', r: 12 }), svg('circle', { class: 'mark', r: 4 }), n.nm, n.what);
+  n.inner = svg('g', { class: 'g-sub-in' }, svg('circle', { class: 'hit', r: 14 }), petSprite({ mini: true }), n.nm, n.what);
   n.g = svg('g', { class: 'g-sub', tabindex: 0, role: 'button' }, n.title, n.inner);
   n.g.addEventListener('click', () => openAgent(a.id));
   n.g.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openAgent(a.id); } });

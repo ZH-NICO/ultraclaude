@@ -99,6 +99,10 @@ Click **ultraclaude** at the top left. Your drive sits in the middle, every fold
   <sub>Shown on a made-up drive.</sub>
 </p>
 
+## The pets
+
+Every agent in the Overview is a small pixel crab, and you can tell what it is doing from how it moves rather than from a colour. Idle, it breathes and blinks. Thinking, it sways under a thought bubble. Working, it types on a keyboard. When it needs you, it hops and shows a "!". Starting up, it stretches awake. Stopped, it sleeps with z z z. And when it finishes a turn it jumps for joy. Subagents are small crabs that type along beside their agent. With reduced motion switched on in your system, they stay still. The crab is our own drawing of a Clawd-like character, inspired by [clawd-on-desk](https://github.com/rullerzhou-afk/clawd-on-desk); no artwork from that project is used.
+
 ## Subagents
 
 When an agent starts a subagent (Claude Code's Agent tool), it appears in the Overview as a small node hanging off that agent, not off the memory. It grows out of its agent, shows what it is doing while data flows along its link, and when it finishes its result travels back and it folds away. Background subagents stay until they report back.

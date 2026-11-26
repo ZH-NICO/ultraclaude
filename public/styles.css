@@ -703,3 +703,80 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 .g-ping.sub { stroke: var(--working); }
 .g-ping.done { stroke: var(--working); stroke-width: 2; }
 @media (prefers-reduced-motion: reduce) { .g-sublink, .g-sub .mark { animation: none; } }
+
+/* ---------- the pet: one animation per state instead of coloured dots ---------- */
+.pet { --pet: #d97757; --pet-eye: #1b1b1b; }
+.pet-fill, .pet-arm path, .pet-legs path { fill: var(--pet); }
+.pet-eyes path, .pet-shut rect { fill: var(--pet-eye); }
+.pet-shadow { fill: #000; opacity: .3; }
+:root[data-theme="light"] .pet-shadow { opacity: .12; }
+.pet-body, .pet-arm, .pet-legs, .pet-eyes, .pet-shut, .pet-alert, .pet-think, .pet-zzz .z, .pet-spark .s, .pet-kbd .key { transform-box: fill-box; transform-origin: 50% 50%; }
+.pet-body { transform-origin: 50% 100%; }
+.pet-shut, .pet-kbd, .pet-think, .pet-alert, .pet-zzz, .pet-spark { display: none; }
+.pet-kbd .k { fill: #2a2a2d; stroke: #55555b; stroke-width: .6; }
+.pet-kbd .key { fill: #85858c; }
+.pet-think circle, .pet-think rect { fill: var(--bg-2); stroke: var(--fg-3); stroke-width: 1; }
+.pet-think .dot { fill: var(--fg); stroke: none; }
+.pet-alert rect { fill: var(--waiting); }
+.pet-alert .bang { fill: #1b1b1b; }
+.pet-zzz .z { fill: var(--fg-2); font: 600 10px var(--mono); }
+.pet-spark .s { stroke: #f2c14e; stroke-width: 1.6; stroke-linecap: round; fill: none; }
+
+/* idle: breathes and blinks */
+.mood-idle .pet-body { animation: pet-breathe 3.2s ease-in-out infinite; }
+.mood-idle .pet-eyes { animation: pet-blink 4.6s infinite; }
+/* thinking: sways, looks up, a thought bubble with dots */
+.mood-thinking .pet-think { display: inline; animation: pet-float 2.4s ease-in-out infinite; }
+.mood-thinking .pet-think .dot { animation: pet-dot 1.2s infinite; }
+.mood-thinking .pet-think .d1 { animation-delay: .2s; }
+.mood-thinking .pet-think .d2 { animation-delay: .4s; }
+.mood-thinking .pet-body { animation: pet-sway 2.4s ease-in-out infinite; }
+.mood-thinking .pet-eyes { transform: translate(1.5px, -1.5px); }
+/* working: types on its keyboard */
+.mood-working .pet-kbd, .g-sub .pet-kbd { display: inline; }
+.mood-working .pet-body, .g-sub .pet-body { animation: pet-bob .34s ease-in-out infinite; }
+.mood-working .pet-arm, .g-sub .pet-arm { animation: pet-tap .22s ease-in-out infinite alternate; }
+.mood-working .pet-arm.l, .g-sub .pet-arm.l { animation-delay: .11s; }
+.mood-working .pet-eyes, .g-sub .pet-eyes { transform: translateY(1.2px); }
+.mood-working .pet-kbd .key, .g-sub .pet-kbd .key { animation: pet-key .5s steps(1) infinite; }
+.pet-kbd .k1 { animation-delay: .2s !important; } .pet-kbd .k2 { animation-delay: .35s !important; } .pet-kbd .k3 { animation-delay: .1s !important; } .pet-kbd .k4 { animation-delay: .4s !important; }
+/* waiting for you: hops, waves and shows a "!" */
+.mood-waiting .pet-alert { display: inline; animation: pet-float 1s ease-in-out infinite; }
+.mood-waiting .pet-body, .mood-waiting .pet-legs { animation: pet-hop 1.2s ease-in-out infinite; }
+.mood-waiting .pet-arm.r { animation: pet-wave .5s ease-in-out infinite alternate; }
+/* starting: wakes up */
+.mood-starting .pet-eyes { animation: pet-blink 1.1s infinite; }
+.mood-starting .pet-body { animation: pet-stretch 1.6s ease-in-out infinite; }
+/* stopped: sleeps */
+.mood-stopped .pet { --pet: #7d4a3c; --pet-eye: #120d0b; }
+.mood-stopped .pet-eyes { display: none; }
+.mood-stopped .pet-shut, .mood-stopped .pet-zzz { display: inline; }
+.mood-stopped .pet-body { animation: pet-sleep 4s ease-in-out infinite; }
+.mood-stopped .pet-zzz .z { animation: pet-z 2.7s ease-out infinite; opacity: 0; }
+.mood-stopped .pet-zzz .z1 { animation-delay: .9s; } .mood-stopped .pet-zzz .z2 { animation-delay: 1.8s; }
+/* a turn just finished: jumps for joy with sparkles */
+.g-node.happy .pet-spark { display: inline; }
+.g-node.happy .pet-spark .s { animation: pet-twinkle .55s ease-in-out infinite alternate; }
+.g-node.happy .pet-spark .s1, .g-node.happy .pet-spark .s3 { animation-delay: .27s; }
+.g-node.happy .pet-body, .g-node.happy .pet-legs { animation: pet-jump .52s ease-in-out 3; }
+.g-node.happy .pet-arm { animation: none; transform: translateY(-3px); }
+.g-node.happy .pet-kbd, .g-node.happy .pet-think { display: none; }
+/* the label no longer needs a dot to show the state */
+.g-node .hit { fill: transparent; }
+
+@keyframes pet-breathe { 50% { transform: scaleY(.94); } }
+@keyframes pet-blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.1); } }
+@keyframes pet-sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes pet-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes pet-dot { 0%, 70%, 100% { opacity: .25; } 35% { opacity: 1; } }
+@keyframes pet-bob { 50% { transform: translateY(1px); } }
+@keyframes pet-tap { from { transform: translateY(0); } to { transform: translateY(3px); } }
+@keyframes pet-key { 0% { fill: #85858c; } 50% { fill: #f4f4f4; } }
+@keyframes pet-hop { 0%, 55%, 100% { transform: translateY(0); } 72% { transform: translateY(-5px); } 86% { transform: translateY(0); } }
+@keyframes pet-wave { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+@keyframes pet-stretch { 0%, 100% { transform: scaleY(.9); } 50% { transform: scaleY(1.05); } }
+@keyframes pet-sleep { 50% { transform: scaleY(.9); } }
+@keyframes pet-z { 0% { opacity: 0; transform: translate(0, 0) scale(.7); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(9px, -16px) scale(1.25); } }
+@keyframes pet-twinkle { from { opacity: .2; transform: scale(.6); } to { opacity: 1; transform: scale(1.2); } }
+@keyframes pet-jump { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-8px); } }
+@media (prefers-reduced-motion: reduce) { .pet * { animation: none !important; } }
