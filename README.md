@@ -99,6 +99,10 @@ Click **ultraclaude** at the top left. Your drive sits in the middle, every fold
   <sub>Shown on a made-up drive.</sub>
 </p>
 
+## Changes
+
+In a git repository, **Changes** shows what each agent changed. Agents started with *Own worktree* work on their own branch; for each one you see the files, the full diff (uncommitted and new files included) and three buttons: **Commit all**, **Merge into main** (stops cleanly on a conflict and changes nothing), and **Open pull request** (pushes the branch and runs `gh pr create --fill`, if the GitHub CLI is installed). The main folder's uncommitted changes are listed too.
+
 ## Cost guard
 
 The guard watches the current 5-hour window against your limit (the one under *Settings → Usage*, or your busiest earlier window). At 80% it warns in the sidebar, with the time the window is full at the current pace. At 95% it stops the running agents, so a forgotten team doesn't use up the rest. **Resume** starts them again, and they continue their sessions. Both marks, auto-resume when a new window starts, and switching it off are under *Settings → Usage*.

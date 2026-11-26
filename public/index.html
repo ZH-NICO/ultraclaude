@@ -54,6 +54,7 @@
       <button type="button" data-view="tasks">Tasks<span class="num" id="navTasks"></span></button>
       <button type="button" data-view="memory">Memory<span class="num" id="navNotes"></span></button>
       <button type="button" data-view="replay">Replay</button>
+      <button type="button" data-view="changes">Changes<span class="num" id="navChanges"></span></button>
     </nav>
     <div class="update guard" id="guardBar" role="status" hidden>
       <span id="guardText"></span>
@@ -130,6 +131,19 @@
       </div>
     </section>
 
+    <section id="view-changes" class="view" hidden>
+      <header class="view-head">
+        <h1>Changes</h1>
+        <p class="sub" id="changesSub"></p>
+        <div class="head-actions">
+          <button type="button" class="btn" id="changesRefresh">Refresh</button>
+        </div>
+      </header>
+      <div class="changes">
+        <aside class="wt-list" id="wtList"></aside>
+        <article class="wt-view" id="wtView"></article>
+      </div>
+    </section>
     <section id="view-replay" class="view" hidden>
       <header class="view-head">
         <h1>Replay</h1>

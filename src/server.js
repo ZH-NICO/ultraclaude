@@ -18,6 +18,7 @@ import { loadConfig, HOME_DIR } from './config.js';
 import { Accounts, AuthError } from './accounts.js';
 import { usageReport } from './usage.js';
 import { Guard } from './guard.js';
+import * as git from './git.js';
 
 const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
@@ -211,6 +212,22 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const who = sessionOf(req);
     if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
     if (route === 'GET /api/graph') return send(res, 200, project.vault.graph());
+    if (url.pathname === '/api/changes' || url.pathname.startsWith('/api/changes/')) {
+      // what the agents changed in git: worktrees, diffs, and bringing the work home
+      if (route === 'GET /api/changes') {
+        if (!(await git.isRepo(project.dir))) return send(res, 200, { repo: false });
+        const list = await Promise.all((await git.worktrees(project.dir)).map((w) => git.changes(project.dir, w.path)));
+        const owner = (w) => project.state.agents.find((a) => a.worktree && `${w.path} ${w.branch}`.includes(`uc-${a.id}`))?.name || '';
+        return send(res, 200, { repo: true, worktrees: list.map((w) => ({ ...w, agent: w.main ? '' : owner(w) })) });
+      }
+      if (route === 'GET /api/changes/diff') return send(res, 200, await git.diff(project.dir, url.searchParams.get('path')));
+      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
+      const b = await readBody(req);
+      if (route === 'POST /api/changes/commit') { await git.commitAll(project.dir, b.path, b.message); project.event('git', 'user', `committed in ${path.basename(String(b.path))}: ${b.message || 'Work from UltraClaude'}`); return send(res, 200, { ok: true }); }
+      if (route === 'POST /api/changes/merge') { const r = await git.merge(project.dir, b.path); project.event('git', 'user', `merged ${path.basename(String(b.path))} into ${r.into}`); return send(res, 200, r); }
+      if (route === 'POST /api/changes/pr') { const r = await git.pullRequest(project.dir, b.path); project.event('git', 'user', `opened a pull request: ${r.url}`); return send(res, 200, r); }
+      return send(res, 404, { error: 'Not found' });
+    }
     if (route === 'GET /api/guard') return send(res, 200, costGuard.view());
     if (route === 'PATCH /api/guard' || route === 'POST /api/guard/resume') {
       if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
