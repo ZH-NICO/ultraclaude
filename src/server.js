@@ -17,6 +17,7 @@ import { handleMcp } from './mcp.js';
 import { loadConfig, HOME_DIR } from './config.js';
 import { Accounts, AuthError } from './accounts.js';
 import { usageReport } from './usage.js';
+import { Guard } from './guard.js';
 
 const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
@@ -113,6 +114,9 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   project.on('notes', () => broadcast({ t: 'notes', count: noteCount() }));
   project.on('pty', (id, d) => broadcast({ t: 'out', id, d }));
   project.on('sessions', () => broadcast({ t: 'sessions', sessions: project.sessions() }));
+  // the cost guard lives next to the accounts, so tests with their own accounts file get their own guard
+  const costGuard = new Guard({ file: path.join(path.dirname(usersFile), 'guard.json'), project, report: () => usageReport({ range: 'today', blockLimit: costGuard.config.limit }) });
+  costGuard.on('change', (guard) => broadcast({ t: 'guard', guard }));
 
   const send = (res, status, body, headers = {}) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY, ...headers });
@@ -159,7 +163,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       return send(res, 200, { ok: true }, { 'set-cookie': cookie('', 0) });
     }
     if (route === 'PATCH /api/auth/profile') return send(res, 200, { user: accounts.publicUser(await accounts.updateProfile(user, body)) });
-    if (route === 'PATCH /api/auth/prefs') return send(res, 200, { user: accounts.publicUser(accounts.setPrefs(user, body)) });
+    if (route === 'PATCH /api/auth/prefs') {
+      const out = accounts.publicUser(accounts.setPrefs(user, body));
+      if (body.blockLimit !== undefined && !user.guest) await costGuard.update({ limit: out.prefs.blockLimit ?? null }).catch(() => {}); // the window limit is the guard's limit too
+      return send(res, 200, { user: out });
+    }
     if (route === 'POST /api/auth/password') {
       await accounts.changePassword(user, body.current, body.next, session);
       dropSockets((s) => s.userId === user.id && s !== session);
@@ -182,9 +190,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   }
 
   let closing = false;
+  let guardTimer = null;
   const close = async () => {
     if (closing) return;
     closing = true;
+    clearInterval(guardTimer);
     project.stopAll();
     project.saveNow();
     for (const ws of clients) ws.terminate();
@@ -201,6 +211,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const who = sessionOf(req);
     if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
     if (route === 'GET /api/graph') return send(res, 200, project.vault.graph());
+    if (route === 'GET /api/guard') return send(res, 200, costGuard.view());
+    if (route === 'PATCH /api/guard' || route === 'POST /api/guard/resume') {
+      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
+      return send(res, 200, route === 'PATCH /api/guard' ? await costGuard.update(await readBody(req)) : await costGuard.resume());
+    }
     if (route === 'GET /api/replay') {
       const since = Math.max(0, Number(url.searchParams.get('since')) || 0);
       const events = project.recorded({ since, limit: 8000 });
@@ -236,7 +251,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         project: { name: project.name, dir: project.dir, vault: project.vault.root, inObsidian: knownToObsidian(project.vault.root) },
         roles: ROLES.map(({ prompt, ...r }) => r),
         agents: project.views(), tasks: project.state.tasks, events: project.events.slice(-150), notes: noteCount(), sessions: project.sessions(),
-        version, latest: codeVersion(),
+        version, latest: codeVersion(), guard: costGuard.view(),
       });
     }
     if (route === 'POST /api/agents') return send(res, 200, project.createAgent(body));
@@ -374,6 +389,9 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     project.startAgent(a.id).catch((err) => project.event('error', a.name, `failed to start: ${err.message}`));
   }
   if (resume.length) project.save();
+  guardTimer = setInterval(() => costGuard.tick(), 60_000);
+  guardTimer.unref();
+  setTimeout(() => { if (!closing) costGuard.tick(); }, 5_000).unref();
   const info = { port: actualPort, token, pid: process.pid, url: `http://127.0.0.1:${actualPort}/?t=${token}` };
   fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify({ ...info, cliKey }), { mode: 0o600 });
 

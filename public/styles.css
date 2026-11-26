@@ -564,3 +564,10 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 @keyframes pop { from { transform: scale(0.1); } 60% { transform: scale(1.8); } to { transform: scale(1); } }
 .g-ring { fill: none; stroke: var(--fg); stroke-width: 1.8; vector-effect: non-scaling-stroke; pointer-events: none; }
 .g-ring.write { stroke: var(--working); }
+
+
+/* ---------- cost guard ---------- */
+.update.guard.hot { border-color: var(--waiting); color: var(--fg); }
+.guard-card .check { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; }
+.guard-card input[type=number] { width: 64px; margin: 0 6px; }
+.update.guard { margin: 4px 0 12px; }

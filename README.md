@@ -99,6 +99,10 @@ Click **ultraclaude** at the top left. Your drive sits in the middle, every fold
   <sub>Shown on a made-up drive.</sub>
 </p>
 
+## Cost guard
+
+The guard watches the current 5-hour window against your limit (the one under *Settings → Usage*, or your busiest earlier window). At 80% it warns in the sidebar, with the time the window is full at the current pace. At 95% it stops the running agents, so a forgotten team doesn't use up the rest. **Resume** starts them again, and they continue their sessions. Both marks, auto-resume when a new window starts, and switching it off are under *Settings → Usage*.
+
 ## Memory graph
 
 In **Memory**, switch from *List* to *Graph* to see your notes as a network, linked by their `[[wikilinks]]`. Scroll to zoom, drag to move, click a note to open it. Dashed dots are links to notes that don't exist yet; click one to write it. When an agent reads or writes a note, its dot lights up, and new notes appear on their own.
