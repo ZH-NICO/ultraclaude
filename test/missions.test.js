@@ -32,9 +32,9 @@ test('a mission from start to finish', () => {
   p.on('missions', (v) => seen.push(v[0].stage));
   assert.throws(() => startMission(p, { goal: 'short' }), /sentence/);
 
-  const m = startMission(p, { goal: 'Add a dark mode toggle to the settings page', budget: 2 });
+  const m = startMission(p, { goal: 'Add a dark mode toggle to the settings page' });
   assert.equal(m.stage, 'plan');
-  assert.equal(m.budget, 2);
+  assert.ok(!('budget' in m), 'no helper limit to set');
   const lead = p.agent(m.coordinator);
   assert.equal(lead.roleId, 'lead');
   assert.ok(p.state.agents.length === 1);
@@ -52,14 +52,12 @@ test('a mission from start to finish', () => {
   assert.equal(missionViews(p)[0].tasks.total, 2, 'only the team\'s tasks count');
   assert.equal(missionViews(p)[0].stage, 'work');
 
-  // staff within the budget
-  assert.match(tool(p, lead.id, 'team_start_agent', { role: 'feature', task: 'Build the toggle', name: 'Toggle dev' }).text, /1\/2/);
-  assert.match(tool(p, lead.id, 'team_start_agent', { role: 'tester', task: 'Test it' }).text, /2\/2/);
-  const over = tool(p, lead.id, 'team_start_agent', { role: 'docs', task: 'Docs' });
-  assert.ok(over.error && /budget/.test(over.text));
+  // staff it with as many helpers as it needs
+  assert.match(tool(p, lead.id, 'team_start_agent', { role: 'feature', task: 'Build the toggle', name: 'Toggle dev' }).text, /helper 1 of this mission/);
+  for (const role of ['tester', 'docs', 'reviewer', 'architect']) assert.ok(!tool(p, lead.id, 'team_start_agent', { role, task: 'Help' }).error, `starts a ${role} too`);
   assert.ok(tool(p, lead.id, 'team_start_agent', { role: 'lead', task: 'x' }).error, 'no coordinators of coordinators');
   const v = missionViews(p)[0];
-  assert.equal(v.helpers.length, 2);
+  assert.equal(v.helpers.length, 5);
   assert.equal(v.helpers[0], 'Toggle dev');
 
   // a helper's own task counts too, and finishing all of them moves it to check
@@ -80,15 +78,18 @@ test('a mission from start to finish', () => {
   assert.equal(JSON.parse(fs.readFileSync(p.stateFile, 'utf8')).missions[0].status, 'done', 'kept across restarts');
 });
 
-test('stopping a mission stops its team, and the budget is clamped', () => {
+test('stopping a mission stops its team, and a runaway coordinator is stopped at 12 helpers', () => {
   const p = new Project({ dir: tmp('proj'), vaultPath: tmp('vault') });
-  const m = startMission(p, { goal: 'Write the release notes for 2.0', budget: 50 });
-  assert.equal(m.budget, 6);
+  const m = startMission(p, { goal: 'Write the release notes for 2.0' });
+  const lead = p.agent(m.coordinator).id;
+  for (let i = 0; i < 12; i++) assert.ok(!tool(p, lead, 'team_start_agent', { role: 'docs', task: `Part ${i}` }).error);
+  const brake = tool(p, lead, 'team_start_agent', { role: 'docs', task: 'One more' });
+  assert.ok(brake.error && /12 helpers/.test(brake.text));
   const stopped = [];
   p.stopAgent = (id) => stopped.push(id);
   const v = stopMission(p, m.id);
   assert.equal(v.stage, 'stopped');
-  assert.deepEqual(stopped, [p.agent(m.coordinator).id]);
+  assert.equal(stopped.length, 13, 'the coordinator and all its helpers');
   assert.throws(() => stopMission(p, 'nope'), /no such mission/);
   startMission(p, { goal: 'Second mission goal here' }); startMission(p, { goal: 'Third mission goal here' }); startMission(p, { goal: 'Fourth mission goal here' });
   assert.throws(() => startMission(p, { goal: 'Fifth mission goal here' }), /Three missions/);

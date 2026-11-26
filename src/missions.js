@@ -1,10 +1,12 @@
-// Mission Control: you give one goal, a coordinator agent plans it into tasks, starts helpers within a
-// budget, tracks them and reports back. Progress comes from the mission's tasks on the board.
+// Mission Control: you give one goal, a coordinator agent plans it into tasks, starts the helpers it needs,
+// tracks them and reports back. Progress comes from the mission's tasks on the board.
 import crypto from 'node:crypto';
 import { ROLES } from './roles.js';
 
 const HELPER_ROLES = ROLES.filter((r) => !['lead', 'custom'].includes(r.id)).map((r) => r.id);
 const STAGES = ['plan', 'work', 'check', 'done'];
+// The coordinator starts as many helpers as the work needs. This is only an emergency brake against a runaway loop.
+const MAX_HELPERS = 12;
 
 /** Which step a mission is at: plan (no tasks yet), work (tasks open), check (all done, not reported), done. */
 export function stageOf(m, tasks) {
@@ -19,7 +21,7 @@ export function missionView(project, m) {
   const tasks = project.state.tasks.filter((t) => t.mission === m.id);
   const name = (id) => project.state.agents.find((a) => a.id === id)?.name || '';
   return {
-    id: m.id, goal: m.goal, status: m.status, budget: m.budget, createdAt: m.createdAt, endedAt: m.endedAt || 0, summary: m.summary || '',
+    id: m.id, goal: m.goal, status: m.status, createdAt: m.createdAt, endedAt: m.endedAt || 0, summary: m.summary || '',
     stage: stageOf(m, project.state.tasks), stages: STAGES,
     coordinator: name(m.coordinator), helpers: m.helpers.map(name).filter(Boolean),
     tasks: { total: tasks.length, done: tasks.filter((t) => t.status === 'done').length, open: tasks.filter((t) => t.status !== 'done').map((t) => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee })) },
@@ -37,13 +39,12 @@ export function missionOf(project, agentRef) {
 
 const changed = (project) => { project.save(); project.emit('missions', missionViews(project)); };
 
-export function startMission(project, { goal, budget = 3 }) {
+export function startMission(project, { goal }) {
   const text = String(goal ?? '').trim();
   if (text.length < 8) throw new Error('Describe the goal in a sentence or two.');
-  const max = Math.min(6, Math.max(1, Math.round(Number(budget) || 3)));
   project.state.missions ||= [];
   if (project.state.missions.filter((m) => m.status === 'running').length >= 3) throw new Error('Three missions are already running. Stop one first.');
-  const m = { id: crypto.randomBytes(3).toString('hex'), goal: text.slice(0, 2000), status: 'running', budget: max, helpers: [], coordinator: '', createdAt: Date.now() };
+  const m = { id: crypto.randomBytes(3).toString('hex'), goal: text.slice(0, 2000), status: 'running', helpers: [], coordinator: '', createdAt: Date.now() };
   project.state.missions.push(m);
   const lead = project.createAgent({ roleId: 'lead', name: `Mission ${m.id}`, prompt: briefing(m) });
   m.coordinator = lead.id;
@@ -56,10 +57,10 @@ function briefing(m) {
   return `[UltraClaude mission ${m.id}] Goal: ${m.goal}
 You coordinate this mission. Work in these steps:
 1. Plan: read the code and shared memory as needed, then put every piece of work on the board with task_create, one task each, with clear acceptance criteria.
-2. Staff it: start up to ${m.budget} helper agents with team_start_agent (roles: ${HELPER_ROLES.join(', ')}). Give each one a concrete task and assign its board task to it with task_update. Do the work yourself when a helper is not worth it.
+2. Staff it: start as many helper agents as the work really needs with team_start_agent (roles: ${HELPER_ROLES.join(', ')}), so independent pieces run in parallel. Give each one a concrete task and assign its board task to it with task_update. Every agent uses the user's Claude quota, so do small pieces yourself and reuse a helper that is free with send_message instead of starting another.
 3. Track: follow the board and your messages, answer questions, check results, and send work back when it is not good enough.
 4. Finish: when every task is done and checked, call mission_done with a short summary for the user of what was done and what is left.
-Stay within the budget. If the goal is unclear, ask the user with send_message to "user".`;
+If the goal is unclear, ask the user with send_message to "user".`;
 }
 
 export function stopMission(project, id) {
@@ -77,7 +78,7 @@ export function stopMission(project, id) {
 // ---------- the coordinator's tools ----------
 
 export const MISSION_TOOLS = [
-  { name: 'team_start_agent', description: 'Mission coordinator only: start a helper agent with a role and a first task. Counts against the mission budget.',
+  { name: 'team_start_agent', description: 'Mission coordinator only: start a helper agent with a role and a first task. Start as many as the work needs.',
     inputSchema: { type: 'object', properties: {
       role: { type: 'string', enum: HELPER_ROLES, description: 'The helper\'s role' },
       task: { type: 'string', description: 'What the helper should do first, concrete and self-contained' },
@@ -96,12 +97,12 @@ export function callMissionTool(project, agent, name, args = {}) {
   if (name === 'team_start_agent') {
     if (!HELPER_ROLES.includes(args.role)) throw new Error(`role must be one of ${HELPER_ROLES.join(', ')}`);
     if (!String(args.task || '').trim()) throw new Error('Give the helper a task.');
-    if (m.helpers.length >= m.budget) throw new Error(`The budget of ${m.budget} helpers is used up. Reuse a helper with send_message, or do it yourself.`);
+    if (m.helpers.length >= MAX_HELPERS) throw new Error(`This mission already has ${MAX_HELPERS} helpers, the most one mission may start. Reuse a helper with send_message, or do it yourself.`);
     const helper = project.createAgent({ roleId: args.role, name: args.name, prompt: `[UltraClaude mission ${m.id}, coordinated by ${agent.name}] Mission goal: ${m.goal}\nYour task: ${String(args.task).trim()}\nReport to ${agent.name} with send_message when done or stuck, and keep your board task up to date.` });
     m.helpers.push(helper.id);
     project.event('mission', agent.name, `started ${helper.name} for mission ${m.id}`, { mission: m.id, to: helper.name });
     changed(project);
-    return `Started ${helper.name} (${m.helpers.length}/${m.budget} helpers used). It begins with its task now.`;
+    return `Started ${helper.name} (helper ${m.helpers.length} of this mission). It begins with its task now.`;
   }
   if (name === 'mission_done') {
     m.status = 'done';

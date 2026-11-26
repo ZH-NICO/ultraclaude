@@ -109,7 +109,7 @@ When an agent starts a subagent (Claude Code's Agent tool), it appears in the Ov
 
 ## Missions
 
-Give the team one goal under **Missions** and say how many helpers it may use (1 to 6). A coordinator agent plans the goal into tasks on the board, starts helpers with the roles it needs, follows their work and reports back. Each mission is a card with the steps **Plan → Work → Check → Done**, the share of its tasks that are done, the open ones, and the coordinator's final report. **Stop** stops the coordinator and every helper it started. Only the coordinator of a running mission can start agents, and never more than its budget.
+Give the team one goal under **Missions**. A coordinator agent plans the goal into tasks on the board, starts as many helpers as the work needs, with the roles it needs, follows their work and reports back. Each mission is a card with the steps **Plan → Work → Check → Done**, the share of its tasks that are done, the open ones, and the coordinator's final report. **Stop** stops the coordinator and every helper it started. Only the coordinator of a running mission can start agents; it is told to keep the team lean, and a mission stops at 12 helpers as an emergency brake.
 
 ## Changes
 

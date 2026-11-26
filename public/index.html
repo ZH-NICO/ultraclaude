@@ -143,10 +143,9 @@
           <label for="missionGoal">What should the team get done?</label>
           <textarea id="missionGoal" rows="3" placeholder="For example: add a dark mode toggle to the settings page, remember the choice, and test it."></textarea>
           <div class="mission-row">
-            <label>Helpers, at most <input type="number" id="missionBudget" min="1" max="6" value="3"></label>
             <button type="submit" class="btn primary">Start mission</button>
           </div>
-          <p class="fine">A coordinator agent plans the goal into tasks on the board, starts up to this many helpers, follows their work and reports back here. Every agent uses your Claude Code quota, and the cost guard still applies.</p>
+          <p class="fine">A coordinator agent plans the goal into tasks on the board, starts as many helpers as the work needs, follows their work and reports back here. Every agent uses your Claude Code quota, and the cost guard still applies.</p>
         </form>
         <div id="missionList"></div>
       </div>
