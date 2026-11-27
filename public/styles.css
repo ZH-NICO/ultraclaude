@@ -9,31 +9,23 @@
 
 :root {
   color-scheme: dark;
-  --bg: #0f1113;      /* page */
-  --bg-2: #171a1d;    /* raised: inputs, cards, selected rows */
-  --bg-3: #1f2327;    /* hover */
-  --line: #24282d;
-  --line-2: #373d44;
-  --fg: #e7e9eb;
-  --fg-2: #a0a6ad;
-  --fg-3: #78808a;
+  --bg: #000;         /* page: pure black, like the brain */
+  --bg-2: #000;       /* inputs and cards are black too; their border sets them apart */
+  --bg-3: #000;       /* hover shows as a white edge */
+  --line: rgba(255,255,255,.14);
+  --line-2: rgba(255,255,255,.3);
+  --fg: #fff;
+  --fg-2: rgba(255,255,255,.74);
+  --fg-3: rgba(255,255,255,.52);
   --working: #46c26d;
   --waiting: #dba42a;
   --error: #f0605a;
-  --term: #0a0b0d;    /* terminals stay dark in both themes */
+  --term: #000;       /* terminals stay black in both themes */
   --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
   --r: 4px;
 }
-/* light: by the system setting, unless the account chose dark; or when the account chose light */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    color-scheme: light;
-    --bg: #fbfbfc; --bg-2: #f1f3f5; --bg-3: #e7eaed; --line: #e2e5e8; --line-2: #c4c9cf;
-    --fg: #15181b; --fg-2: #555c65; --fg-3: #6a717a;
-    --working: #1c7c3a; --waiting: #946200; --error: #c9252d;
-  }
-}
+/* black unless the account chose light */
 :root[data-theme="light"] {
   color-scheme: light;
   --bg: #fbfbfc; --bg-2: #f1f3f5; --bg-3: #e7eaed; --line: #e2e5e8; --line-2: #c4c9cf;
@@ -713,7 +705,7 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 .pet-body, .pet-arm, .pet-legs, .pet-eyes, .pet-shut, .pet-alert, .pet-think, .pet-zzz .z, .pet-spark .s, .pet-kbd .key { transform-box: fill-box; transform-origin: 50% 50%; }
 .pet-body { transform-origin: 50% 100%; }
 .pet-shut, .pet-kbd, .pet-think, .pet-alert, .pet-zzz, .pet-spark { display: none; }
-.pet-kbd .k { fill: #2a2a2d; stroke: #55555b; stroke-width: .6; }
+.pet-kbd .k { fill: #000; stroke: rgba(255,255,255,.45); stroke-width: .6; }
 .pet-kbd .key { fill: #85858c; }
 .pet-think circle, .pet-think rect { fill: var(--bg-2); stroke: var(--fg-3); stroke-width: 1; }
 .pet-think .dot { fill: var(--fg); stroke: none; }
@@ -783,7 +775,7 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 
 /* ---------- brain (every chat on this computer) ---------- */
 /* black and white like a dark room, whatever the theme; colour comes only from the regions */
-#view-map { --bg: #000; --bg-2: #0a0a0a; --line: rgba(255,255,255,.12); --line-2: rgba(255,255,255,.22); --fg: #fff; --fg-2: rgba(255,255,255,.72); --fg-3: rgba(255,255,255,.45); background: #000; color: #fff; }
+#view-map { --bg: #000; --bg-2: #000; --line: rgba(255,255,255,.12); --line-2: rgba(255,255,255,.22); --fg: #fff; --fg-2: rgba(255,255,255,.72); --fg-3: rgba(255,255,255,.45); background: #000; color: #fff; }
 #view-map .view-head { border-bottom-color: var(--line); }
 #view-map .view-head h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: #fff; }
 #view-map .view-head .sub { color: var(--fg-3); }
@@ -917,7 +909,7 @@ table.pivot .cell { background: rgba(77,163,255,var(--a)); color: #fff; }
 table.pivot .cell button { width: 100%; text-align: right; }
 table.pivot .sum { color: #fff; font-weight: 600; }
 .pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; font-size: 12px; color: rgba(255,255,255,.55); }
-.pickbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: #0d0d0d; font-size: 12.5px; }
+.pickbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: #000; font-size: 12.5px; }
 .pickbar .pg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pickbar .into { width: 280px; max-width: 60vw; }
 .pickbar .tagin { width: 100px; }
@@ -951,3 +943,13 @@ table.pivot .sum { color: #fff; font-weight: 600; }
 .file-look pre { max-height: 280px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font: 11px/1.5 var(--mono); color: rgba(255,255,255,.75); white-space: pre-wrap; overflow-wrap: anywhere; }
 .file-meta:empty { display: none; }
 @media (max-width: 820px) { .brain-bar .spacer { display: none; } .brain-data { padding: 12px; } }
+
+/* black everywhere: with no grey surfaces, hover and selection are drawn as white edges */
+:root:not([data-theme="light"]) :is(nav button, .agent, .tnode, .session, .arow, .set-nav button:not(.link), .seg button, .wt, .profile, .set-close):hover { box-shadow: inset 0 0 0 1px var(--line); }
+:root:not([data-theme="light"]) :is(nav button.active, .agent.active, .tnode.active, .arow.picked, .set-nav button.active, .wt.on, .btn.active) { box-shadow: inset 0 0 0 1px var(--fg); }
+:root:not([data-theme="light"]) .seg button.on { background: var(--fg); color: var(--bg); }
+:root:not([data-theme="light"]) .btn:not(.primary):hover { border-color: var(--fg); }
+:root:not([data-theme="light"]) .col.over { box-shadow: inset 0 0 0 1px var(--fg); }
+:root:not([data-theme="light"]) .bar { background: var(--line); }
+:root:not([data-theme="light"]) .toast { border-color: var(--line-2); }
+:root:not([data-theme="light"]) .avatar { box-shadow: inset 0 0 0 1px var(--line-2); }

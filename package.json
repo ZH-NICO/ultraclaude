@@ -1,6 +1,6 @@
 {
   "name": "ultraclaude",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Run a team of Claude Code agents side by side: shared Obsidian memory, roles, agent-to-agent messaging and a live dashboard.",
   "type": "module",
   "bin": {

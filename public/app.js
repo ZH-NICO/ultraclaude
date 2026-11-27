@@ -745,7 +745,7 @@ function ensureTerm(a) {
   if (terms.has(a.id)) return terms.get(a.id);
   const term = new Terminal({
     fontFamily: '"Cascadia Mono", Consolas, "IBM Plex Mono", monospace', fontSize: S.user?.prefs.termFont || 13, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
-    theme: { background: '#0a0b0d', foreground: '#e7e9eb', cursor: '#e7e9eb', selectionBackground: '#373d44' },
+    theme: { background: '#000000', foreground: '#ffffff', cursor: '#ffffff', selectionBackground: '#4d4d4d' },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -1438,9 +1438,9 @@ function tabProfile() {
 
 function tabAppearance() {
   const p = S.user.prefs;
-  const themes = [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']];
+  const themes = [['dark', 'Black'], ['light', 'Light']];
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Theme' }, themes.map(([v, label]) => h('button', {
-    type: 'button', class: p.theme === v ? 'on' : '', 'aria-pressed': String(p.theme === v),
+    type: 'button', class: (p.theme === 'light' ? 'light' : 'dark') === v ? 'on' : '', 'aria-pressed': String((p.theme === 'light' ? 'light' : 'dark') === v),
     onclick: guard(async () => { await savePrefs({ theme: v }); tabAppearance(); }),
   }, label)));
   const out = h('output', {}, `${p.termFont} px`);
@@ -1454,7 +1454,7 @@ function tabAppearance() {
   }));
   $('tab-appearance').replaceChildren(
     h('h2', {}, 'Appearance'),
-    h('div', { class: 'group' }, h('h3', {}, 'Theme'), seg, h('p', { class: 'fine' }, 'System follows your computer. The terminals stay dark in both themes.')),
+    h('div', { class: 'group' }, h('h3', {}, 'Theme'), seg, h('p', { class: 'fine' }, 'UltraClaude is black unless you choose light. The terminals stay black in both.')),
     h('div', { class: 'group' }, h('h3', {}, 'Terminal text size'), h('div', { class: 'range' }, slider, out)),
     h('div', { class: 'group' }, h('h3', {}, 'Notifications'), h('label', { class: 'switch' }, notify, 'Tell me when an agent needs me and this window is in the background')));
 }

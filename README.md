@@ -103,7 +103,7 @@ npm link
   </tr>
 </table>
 
-In the Overview every agent is an animated pixel pet, so you see its state from how it moves (see [The pets](#the-pets)). The window follows your system's light or dark theme.
+In the Overview every agent is an animated pixel pet, so you see its state from how it moves (see [The pets](#the-pets)). The window is black; a light theme is in the settings.
 
 ## Your whole computer in one brain
 
@@ -202,7 +202,7 @@ Bottom left in the sidebar is your profile: your photo (or initials) and your na
 | Section | What it does |
 | --- | --- |
 | **Profile** | Photo, first and last name, email |
-| **Appearance** | System, light or dark theme, terminal text size, desktop notifications |
+| **Appearance** | Black or light theme, terminal text size, desktop notifications |
 | **Usage** | What your Claude Code chats used, see below |
 | **Security** | Change your password, see and end sessions on other devices, delete the account |
 | **About** | Version, project and vault paths, keyboard shortcuts |
