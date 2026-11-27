@@ -94,6 +94,8 @@ let brainFiles = null; // the index from the server, once it is built
 let brainIndex = { state: 'idle', files: 0 };
 const ask = { items: [], busy: false };
 let views = null; // table, pivot, timeline, storage and duplicates
+let legendClosed = false; // the list of regions on the brain, folded away or not
+try { legendClosed = localStorage.getItem('uc-legend-closed') === '1'; } catch { /* no storage */ }
 
 function brainViews() {
   views ||= new BrainViews({
@@ -172,7 +174,14 @@ function syncBrain() {
   if (chatPick?.id) brain.selected = `${chatPick.key}/${chatPick.id}`;
   else if (!chatPick?.file) brain.selected = null;
   const hits = q ? brain.model.neurons.filter(brain.match).length : 0;
-  $('brainLegend').replaceChildren(...brain.model.regions.map((r) => h('button', {
+  const open = !legendClosed;
+  const fold = h('button', { type: 'button', class: 'fold', 'aria-expanded': String(open), title: open ? 'Hide the list' : 'Show the list', onclick: () => {
+    legendClosed = open;
+    try { localStorage.setItem('uc-legend-closed', open ? '1' : ''); } catch { /* only remembered for now */ }
+    syncBrain();
+    $('brainLegend').querySelector('.fold')?.focus();
+  } }, h('i', { 'aria-hidden': 'true' }, open ? '▾' : '▸'), 'Regions', h('b', {}, String(brain.model.regions.length)));
+  $('brainLegend').replaceChildren(fold, ...(open ? brain.model.regions : []).map((r) => h('button', {
     type: 'button', class: `region${brain.focus === r.key ? ' on' : ''}${brain.focus && brain.focus !== r.key ? ' off' : ''}`, style: `--rc:${r.color}`, title: r.path || r.name,
     onclick: () => { chatPick = chatPick?.region === r.key ? null : { region: r.key }; if (chatPick) setSide('details'); syncBrain(); },
   }, h('i'), h('span', {}, r.name), h('b', {}, num(r.count)))));

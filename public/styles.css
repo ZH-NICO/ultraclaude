@@ -785,7 +785,7 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 /* black and white like a dark room, whatever the theme; colour comes only from the regions */
 #view-map { --bg: #000; --bg-2: #0a0a0a; --line: rgba(255,255,255,.12); --line-2: rgba(255,255,255,.22); --fg: #fff; --fg-2: rgba(255,255,255,.72); --fg-3: rgba(255,255,255,.45); background: #000; color: #fff; }
 #view-map .view-head { border-bottom-color: var(--line); }
-#view-map .view-head h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; background: linear-gradient(90deg, #FF5A5F, #FF9F1C, #FFE14D, #7CFF6B, #2EE6D6, #4DA3FF, #9B7BFF, #FF6BD6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#view-map .view-head h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: #fff; }
 #view-map .view-head .sub { color: var(--fg-3); }
 #view-map .head-filter { background: #000; border-color: var(--line-2); color: #fff; }
 #view-map .head-filter:focus { border-color: #fff; }
@@ -793,6 +793,10 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 .brain-stage.dragging, #brainCanvas.dragging { cursor: grabbing; }
 #brainCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .brain-legend { position: absolute; top: 18px; left: 18px; z-index: 2; display: flex; flex-direction: column; gap: 1px; max-height: calc(100% - 230px); overflow-y: auto; }
+.brain-legend .fold { display: flex; align-items: center; gap: 9px; padding: 4px 8px; border: 0; border-radius: 4px; background: none; color: #fff; font-size: 12.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.brain-legend .fold:hover { background: rgba(255,255,255,.07); }
+.brain-legend .fold i { width: 8px; text-align: center; font-style: normal; }
+.brain-legend .fold b { font-weight: 400; color: rgba(255,255,255,.4); }
 .brain-legend .region { display: flex; align-items: center; gap: 9px; padding: 4px 8px; border: 0; border-radius: 4px; background: none; color: rgba(255,255,255,.78); font-size: 12.5px; text-align: left; cursor: pointer; }
 .brain-legend .region i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--rc); box-shadow: 0 0 10px var(--rc); }
 .brain-legend .region span { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
