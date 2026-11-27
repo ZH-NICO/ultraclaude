@@ -109,16 +109,19 @@ In the Overview every agent is an animated pixel pet, so you see its state from 
 
 Click **ultraclaude** at the top left to open your **brain**: every file on this computer as a point of light in a slowly turning 3D brain, with its cerebrum, cerebellum and stem, and every Claude Code chat as a brighter neuron among the files of its folder. The first time it opens, UltraClaude reads the **names** of your files in the background (never their contents; the system, installed programs, app data, hidden folders and `node_modules` are left out; up to 400,000 files, of which up to 40,000 are drawn). Each main folder (Documents, Downloads, your code, …) is a region with its own stretch of the spectrum, listed on the left with its count. The brain builds itself from the stem upwards, today's chats pulse, and now and then a few neurons of a region fire together. Drag to turn it, scroll to zoom, double-click for everything. Hover a point to see the file or chat; click it to open its folder, continue the chat, or ask about it.
 
-**Six views, one filter.** The bar above the brain switches between them, and the type, period, size, tag, folder and search box apply to all of them (*Ctrl+K* jumps to the search):
+**One brain, many shapes.** There are no separate pages. The dock under the brain sends the same dots flying into a new shape, one dot per file (or one per so many, and it says so):
 
-| View | What it shows |
+| Shape | What the dots do |
 |---|---|
-| **Brain** | the 3D brain; with a filter set, the matching files light up |
-| **Table** | every matching file with type, size, date, folder and tags; sort by any column, select files, export CSV |
-| **Pivot** | any two things against each other (type, extension, main folder, folder, year, month, size, tag), counting files or adding up their size; click a cell to see exactly those files |
-| **Timeline** | files per month, coloured by type; click a month to set it as the period everywhere |
-| **Storage** | a treemap of where your disk space goes; click to go into a folder |
-| **Duplicates** | files with the same name and size, biggest waste first |
+| **Brain** | fly home; with a filter set, the matching files light up |
+| **Table** | settle into cells, any two things against each other (main folder by month to begin with; type, extension, folder, year, size, tag); headings and counts slide up the files |
+| **Timeline** | stack into a column per month |
+| **Space** | fill boxes as big as the disk space they take; click a box to go inside |
+| **Copies** | only likely copies stay, as small rings |
+| **Sorted** | line up in one wall by size, date, name, type or folder; bigger files, bigger dots |
+| **List** | the files themselves slide up from below, over the dots |
+
+Draw a box over any dots to pick those files. The little bars bottom right are the period: click a month or drag over several, and it holds in every shape, together with the type, size, tag, folder and search box (*Ctrl+K*; *Escape* goes back). When a plan moves files, **Show** draws them travelling to their new folder, and **Apply** and **Undo** fly the dots there and back. When Claude rearranges the brain, a note at the top says so, with the way back. With reduced motion, the dots simply change places.
 
 **Sort without asking anyone.** Select files in the table (or take all that match, up to 500), name a target folder and optionally sort into subfolders by type, extension, year or month. Duplicates can set the extra copies aside the same way. You get the same plan as from Claude: check it, **Apply**, **Undo**. Nothing is ever deleted. Tag files, and save a view with its filters to open it again with one click. Click a file to see its size, date and a preview of text and pictures.
 

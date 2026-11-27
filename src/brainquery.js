@@ -83,6 +83,22 @@ export function select(index, tags, f = {}) {
 
 export const row = (index, tags, i) => { const [d, name, size, mtime] = index.files[i]; const p = index.pathOf(i); return { path: p, name, dir: index.dirs[d], size: size ?? null, mtime: mtime ?? null, type: typeOf(name), tags: tags.of(p) }; };
 
+/** The matching files as dots for an arrangement: an even sample of at most `limit`. */
+export function points(index, tags, { filter, limit = 40_000 } = {}) {
+  const hits = select(index, tags, filter);
+  const regions = index.dirs.map((d) => index.regionOf(d).name);
+  const step = Math.max(1, hits.length / limit);
+  const dirs = new Map(); const files = [];
+  for (let k = 0; k < hits.length && files.length < limit; k += step) {
+    const i = hits[Math.floor(k)];
+    const [d, name, size, mtime] = index.files[i];
+    if (!dirs.has(d)) dirs.set(d, dirs.size);
+    files.push([dirs.get(d), name, regions[d], typeOf(name), size ?? null, mtime ?? null, tags.of(index.pathOf(i))[0] || '']);
+  }
+  const out = []; for (const [d, j] of dirs) out[j] = index.dirs[d];
+  return { total: hits.length, dirs: out, files };
+}
+
 export function table(index, tags, { filter, sort = 'mtime', desc = true, offset = 0, limit = 100 } = {}) {
   const hits = select(index, tags, filter);
   const by = {

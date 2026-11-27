@@ -167,11 +167,21 @@ export class BrainView {
     this.last = 0;
     this.screen = []; // [neuron, x, y, r, z] as last drawn, for hit tests
     this.sx = null; this.sy = null; // every point's place on screen, as last drawn
+    this.sa = null; this.ss = null; // and its brightness and size
+    this.arrange = null; // (width, height) => arrangement; null: the brain itself
+    this.layout = null; // x, y, alpha, size, colour and file of every point in the arrangement
+    this.morph = null; // the flight from where the dots were to where they belong now
+    this.arcs = null; // a plan shown as dots travelling from their folder to the new one
+    this.box = null; // the box being dragged over an arrangement
+    this.onBox = () => {};
     this.#wire();
   }
 
-  setData(projects, files = null) {
+  setData(projects, files = null, moved = null) {
+    const was = this.#places();
     this.model = buildBrain(projects, files);
+    this.layout = null; this.arcs = null;
+    if (was && files) this.#flyFrom(was, moved);
     this.traces = []; // they point at neurons of the old brain
     this.lit = null;
     if (String(this.selected).startsWith('file:')) this.selected = null;
@@ -179,7 +189,94 @@ export class BrainView {
     this.draw();
   }
 
-  rebootAnimation() { if (!this.calm) this.boot = 0; }
+  rebootAnimation() { if (!this.calm && !this.arrange) this.boot = 0; }
+
+  /** Where every file's dot is on screen right now, by path. */
+  #places() {
+    const m = this.model;
+    if (!m?.files || !this.sx || this.sx.length !== m.points.length) return null;
+    const at = new Map();
+    m.points.forEach((p, i) => { if (p.file >= 0) at.set(low(m.pathOf(p)), [this.sx[i], this.sy[i], this.sa[i], this.ss[i]]); });
+    return at;
+  }
+
+  /** After files moved: their dots fly from where they were to where they belong now. */
+  #flyFrom(was, moved) {
+    const back = new Map((moved || []).map(({ from, to }) => [low(to), low(from)]));
+    const m = this.model; const n = m.points.length;
+    const from = { x: new Float32Array(n).fill(NaN), y: new Float32Array(n), a: new Float32Array(n), s: new Float32Array(n) };
+    m.points.forEach((p, i) => { if (p.file < 0) return; const key = low(m.pathOf(p)); const old = was.get(back.get(key) || key); if (old) [from.x[i], from.y[i], from.a[i], from.s[i]] = old; });
+    this.#startMorph(from);
+  }
+
+  #startMorph(from) {
+    if (this.calm || !from) { this.morph = null; return; }
+    const n = from.x.length; const delay = new Float32Array(n);
+    // a wave from left to right, with a little scatter so it does not look like a curtain
+    for (let i = 0; i < n; i++) delay[i] = Number.isNaN(from.x[i]) ? 0 : Math.max(0, from.x[i]) * 0.35 + (i % 97) * 3;
+    this.morph = { from, delay, at: performance.now(), dur: 900 };
+  }
+
+  /**
+   * Sends the dots into an arrangement, or back into the brain with null. `build(w, h)` returns
+   * { dots: [{ file, x, y, s, rgb }] }; dots that are not needed fade out.
+   */
+  setArrangement(build, { animate = true } = {}) {
+    const n = this.model?.points.length || 0;
+    const have = this.sx && this.sx.length === n;
+    const from = animate && have ? { x: Float32Array.from(this.sx), y: Float32Array.from(this.sy), a: Float32Array.from(this.sa), s: Float32Array.from(this.ss) } : null;
+    this.arrange = build; this.layout = null; this.arcs = null; this.hover = null; this.selected = null; this.lit = null;
+    if (build) { this.goal = null; this.boot = 1; }
+    this.#startMorph(from);
+    if (!this.running) this.draw();
+  }
+
+  /** Gives each dot of the arrangement a point; a file keeps the point it already is, if it has one. */
+  #buildLayout(w, h) {
+    const m = this.model; const n = m.points.length;
+    const L = { w, h, x: new Float32Array(n), y: new Float32Array(n), a: new Float32Array(n), s: new Float32Array(n), col: new Array(n), file: new Array(n) };
+    for (let i = 0; i < n; i++) { L.x[i] = w / 2 + m.points[i].x * w * 0.5; L.y[i] = h / 2 - m.points[i].y * h * 0.5; L.s[i] = 1; }
+    const own = new Map();
+    if (m.files) m.points.forEach((p, i) => { if (p.file >= 0) own.set(low(m.pathOf(p)), i); });
+    const dots = this.arrange(w, h)?.dots || [];
+    const used = new Uint8Array(n); const rest = [];
+    const set = (i, d) => { used[i] = 1; L.x[i] = d.x; L.y[i] = d.y; L.a[i] = 1; L.s[i] = d.s; L.col[i] = d.rgb; L.file[i] = d.file; };
+    for (const d of dots) { const i = d.file ? own.get(low(join(d.file.dir, d.file.name))) : undefined; if (i !== undefined && !used[i]) set(i, d); else rest.push(d); }
+    // spare points in order of place, matched to the remaining dots in order of place, so flights do not cross much
+    rest.sort((a, b) => a.x - b.x);
+    const spare = []; for (let i = 0; i < n && spare.length < rest.length; i++) if (!used[i]) spare.push(i);
+    spare.sort((a, b) => m.points[b].z - m.points[a].z);
+    spare.forEach((i, k) => set(i, rest[k]));
+    return L;
+  }
+
+  /** The files whose dots lie inside a box on the canvas (arrangements only). */
+  filesIn(x0, y0, x1, y1) {
+    const L = this.layout; if (!L) return [];
+    const out = new Map();
+    for (let i = 0; i < L.a.length; i++) if (L.a[i] > 0 && L.file[i] && this.sx[i] >= Math.min(x0, x1) && this.sx[i] <= Math.max(x0, x1) && this.sy[i] >= Math.min(y0, y1) && this.sy[i] <= Math.max(y0, y1)) out.set(join(L.file[i].dir, L.file[i].name), L.file[i]);
+    return [...out.keys()];
+  }
+
+  /** Shows a plan: the files light up and dots travel from them to the folder they would go to. */
+  showMoves(moves, done = false) {
+    const lit = this.show(moves.map((x) => (done ? x.to : x.from)));
+    const m = this.model;
+    if (!lit || !m?.files) return lit;
+    const targets = new Map();
+    const arcs = [...this.lit].slice(0, 60).map((i, k) => {
+      const move = moves[Math.min(k, moves.length - 1)];
+      const key = low(move.to).replace(/[\\/][^\\/]*$/, '');
+      if (!targets.has(key)) {
+        const reg = m.regions.filter((r) => r.path && under(key, r.path)).sort((a, b) => b.path.length - a.path.length)[0] || m.points[i].reg;
+        const own = m.points.filter((p) => p.reg === reg);
+        targets.set(key, own[hashOf(key) % Math.max(1, own.length)] || m.points[i]);
+      }
+      return { i, to: targets.get(key), label: move.to.split(/[\\/]/).slice(-2, -1)[0] };
+    });
+    this.arcs = done ? null : arcs;
+    return lit;
+  }
 
   start() {
     if (this.running) return;
@@ -190,7 +287,7 @@ export class BrainView {
       const dt = Math.min(0.1, (t - this.last) / 1000);
       this.last = t;
       if (!this.calm) {
-        if (!this.dragging && !this.goal) this.yaw += dt * 0.055;
+        if (!this.dragging && !this.goal && !this.arrange && !this.arcs) this.yaw += dt * 0.055;
         this.boot = Math.min(1, this.boot + dt / 2.6);
         this.#fire(t);
       }
@@ -242,7 +339,7 @@ export class BrainView {
 
   /** Back to the whole brain. */
   overview() {
-    this.lit = null;
+    this.lit = null; this.arcs = null;
     this.goal = { x: 0, y: 0, z: 0, yaw: this.yaw, pitch: 0.1, zoom: 1, release: true };
     if (!this.running) { this.#fly(1); this.draw(); }
   }
@@ -298,7 +395,9 @@ export class BrainView {
     const depthA = (z) => 0.3 + 0.7 * Math.max(0, Math.min(1, (z + 1.3) / 2.6));
     const quiet = this.lit ? 0.55 : this.match ? 0.45 : 1;
     const n = points.length;
-    if (!this.sx || this.sx.length !== n) { this.sx = new Float32Array(n); this.sy = new Float32Array(n); }
+    if (!this.sx || this.sx.length !== n) { this.sx = new Float32Array(n); this.sy = new Float32Array(n); this.sa = new Float32Array(n); this.ss = new Float32Array(n); }
+    if (this.arrange && (!this.layout || this.layout.w !== w || this.layout.h !== h)) this.layout = this.#buildLayout(w, h);
+    const L = this.layout; const M = this.morph; let flying = false;
     const data = this.img.data;
     // the same projection as #project, unrolled: this loop runs for every point in every frame
     const cy = Math.cos(this.yaw); const syaw = Math.sin(this.yaw);
@@ -310,34 +409,56 @@ export class BrainView {
     const sx = this.sx; const sy = this.sy;
     for (let i = 0; i < n; i++) {
       const p = points[i];
-      if (p.y >= reveal) { sx[i] = -1e4; continue; }
+      if (p.y >= reveal) { sx[i] = -1e4; this.sa[i] = 0; continue; }
       const x0 = p.x - cx; const y0 = p.y - cyy; const z0 = p.z - cz;
       const x1 = x0 * cy + z0 * syaw; const z1 = -x0 * syaw + z0 * cy;
       const y2 = y0 * cp - z1 * sp; const z2 = y0 * sp + z1 * cp;
       const f = D / Math.max(0.4, D - z2);
-      const x = w / 2 + x1 * scale * f; const y = h * 0.5 - (y2 - 0.08) * scale * f;
-      sx[i] = x; sy[i] = y;
+      let x = w / 2 + x1 * scale * f; let y = h * 0.5 - (y2 - 0.08) * scale * f;
       const depth = z2 < -1.3 ? 0.3 : z2 > 1.3 ? 1 : 0.3 + 0.7 * ((z2 + 1.3) / 2.6);
       const tw = this.calm ? 1 : 0.8 + 0.2 * Math.sin(t / 900 + p.tw);
       let a = (p.file >= 0 || !hasFiles ? 0.95 : 0.5) * (0.35 + 0.65 * depth) * tw * quiet;
       if (this.focus && p.reg?.key !== this.focus) a *= 0.12;
       if (reveal !== Infinity) a *= Math.min(1, (reveal - p.y) * 3);
+      let sz = p.size * f * grow; let col = p.col;
+      if (L) { x = L.x[i]; y = L.y[i]; a = L.a[i] * (0.92 + 0.08 * tw); sz = L.s[i] * dpr; col = L.col[i] || p.col; }
+      if (M) {
+        let k = (t - M.at - M.delay[i]) / M.dur;
+        if (k < 1 && !Number.isNaN(M.from.x[i])) {
+          flying = true;
+          if (k < 0) k = 0;
+          const e = k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2;
+          const arc = Math.sin(Math.PI * e) * ((i % 23) - 11) * 3; // each dot swings a little differently
+          x = M.from.x[i] + (x - M.from.x[i]) * e + arc; y = M.from.y[i] + (y - M.from.y[i]) * e - Math.abs(arc) * 0.6;
+          a = M.from.a[i] + (a - M.from.a[i]) * e; sz = M.from.s[i] * dpr + (sz - M.from.s[i] * dpr) * e;
+        }
+      }
+      sx[i] = x; sy[i] = y; this.sa[i] = a; this.ss[i] = sz / dpr;
       if (a < 0.02) continue;
       if (a > 1) a = 1;
-      const size = Math.max(1, (p.size * f * grow + 0.5) | 0);
+      const size = Math.max(1, (sz + 0.5) | 0);
       const px0 = (x * dpr - size / 2 + 0.5) | 0; const py0 = (y * dpr - size / 2 + 0.5) | 0;
       if (px0 >= W || py0 >= H || px0 + size <= 0 || py0 + size <= 0) continue;
-      const r = p.col[0] * a; const g = p.col[1] * a; const b = p.col[2] * a;
+      const r = col[0] * a; const g = col[1] * a; const b = col[2] * a;
       const ye = Math.min(H, py0 + size); const xe = Math.min(W, px0 + size);
+      const round = size > 3; const mid = (size - 1) / 2; const rim = (mid + 0.35) ** 2;
       for (let yy = py0 < 0 ? 0 : py0; yy < ye; yy++) {
         let o = (yy * W + (px0 < 0 ? 0 : px0)) * 4;
         for (let xx = px0 < 0 ? 0 : px0; xx < xe; xx++, o += 4) { // added light: overlapping points grow brighter
+          if (round && (xx - px0 - mid) ** 2 + (yy - py0 - mid) ** 2 > rim) continue; // bigger dots are round
           data[o] += r; data[o + 1] += g; data[o + 2] += b; // a Uint8ClampedArray stops at 255 by itself
         }
       }
     }
     ctx.putImageData(this.img, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (M && !flying && t - M.at > M.dur) this.morph = null;
+    if (L) { // an arrangement has no threads or neurons: only the dots, the hovered one and the box being dragged
+      this.screen = []; this.np = null;
+      if (this.box) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.strokeRect(this.box.x0, this.box.y0, this.box.x1 - this.box.x0, this.box.y1 - this.box.y0); ctx.setLineDash([]); }
+      for (const key of [this.selected, this.hover?.key].filter(Boolean)) this.#label(key, key === this.selected, w);
+      return;
+    }
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineWidth = 0.6;
     // threads, one path per region, so thousands of them cost a handful of strokes
@@ -376,6 +497,18 @@ export class BrainView {
           ctx.fillText(f[1], this.sx[i] + (right ? 14 : -14), this.sy[i] + 4);
         }
         ctx.textAlign = 'left';
+      }
+    }
+    if (this.arcs) {
+      ctx.lineWidth = 1;
+      for (let k = 0; k < this.arcs.length; k++) {
+        const arc = this.arcs[k]; if (sx[arc.i] < -9e3) continue;
+        const [tx, ty] = this.#project(arc.to.x, arc.to.y, arc.to.z, w, h);
+        const x0 = sx[arc.i]; const y0 = sy[arc.i]; const mx = (x0 + tx) / 2; const my = Math.min(y0, ty) - 70;
+        ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
+        const u = this.calm ? 1 : ((t / 1400 + k * 0.07) % 1); const v = 1 - u;
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v * v * x0 + 2 * v * u * mx + u * u * tx, v * v * y0 + 2 * v * u * my + u * u * ty, 2.6, 0, Math.PI * 2); ctx.fill();
+        if (k === 0 || arc.label !== this.arcs[0].label) { ctx.font = '600 12px "IBM Plex Sans", system-ui, sans-serif'; ctx.fillText(`→ ${arc.label}`, tx + 10, ty + 4); }
       }
     }
     this.screen = [];
@@ -438,8 +571,10 @@ export class BrainView {
       const p = this.model.points[i];
       if (!p || !this.sx || this.sx[i] < -9e3) return;
       x = this.sx[i]; y = this.sy[i];
-      const f = this.model.files.files[p.file];
-      title = f[1]; sub = this.model.files.dirs[f[0]];
+      const laid = this.layout?.file[i];
+      if (this.layout && !laid) return;
+      const f = laid ? null : this.model.files.files[p.file];
+      title = laid ? laid.name : f[1]; sub = laid ? laid.dir : this.model.files.dirs[f[0]];
     } else {
       const nn = this.model.neurons.find((m) => m.key === key);
       const p = nn && this.np?.get(nn);
@@ -465,6 +600,12 @@ export class BrainView {
 
   /** What is under a point on the canvas: a chat's neuron first, then a file. */
   hitAt(x, y) {
+    const L = this.layout;
+    if (L) {
+      let bi = -1; let bd = 8 * 8;
+      for (let i = 0; i < L.a.length; i++) { if (L.a[i] <= 0 || !L.file[i]) continue; const d = (this.sx[i] - x) ** 2 + (this.sy[i] - y) ** 2; if (d < bd) { bd = d; bi = i; } }
+      return bi >= 0 ? { key: `file:${bi}`, file: bi, path: join(L.file[bi].dir, L.file[bi].name) } : null;
+    }
     let best = null; let bd = 14 * 14;
     for (const [nn, nx, ny] of this.screen) { const d = (nx - x) ** 2 + (ny - y) ** 2; if (d < bd) { bd = d; best = nn; } }
     if (best) return best;
@@ -490,6 +631,12 @@ export class BrainView {
         const dx = ev.clientX - drag.x; const dy = ev.clientY - drag.y;
         if (!drag.moved && Math.hypot(dx, dy) < 4) return;
         drag.moved = true; this.dragging = true;
+        if (this.arrange) { // in an arrangement, dragging draws a box around dots
+          const r = c.getBoundingClientRect();
+          this.box = { x0: drag.x - r.x, y0: drag.y - r.y, x1: ev.clientX - r.x, y1: ev.clientY - r.y };
+          if (!this.running) this.draw();
+          return;
+        }
         if (this.goal) this.goal = null; // you take over the camera
         c.classList.add('dragging');
         this.yaw = drag.yaw + dx * 0.008;
@@ -505,6 +652,7 @@ export class BrainView {
       if (!drag) return;
       const moved = drag.moved;
       drag = null; this.dragging = false; c.classList.remove('dragging');
+      if (this.box) { const b = this.box; this.box = null; const files = this.filesIn(b.x0, b.y0, b.x1, b.y1); if (files.length) this.onBox(files); if (!this.running) this.draw(); return; }
       if (!moved && ev.target === c) {
         const hit = this.#at(ev);
         if (hit && hit.file !== undefined) { this.selected = hit.key; this.onPickFile(hit.path); } else if (hit) this.onPick(hit);
@@ -512,6 +660,7 @@ export class BrainView {
     });
     c.addEventListener('wheel', (ev) => {
       ev.preventDefault();
+      if (this.arrange) return;
       const k = Math.exp(-ev.deltaY * 0.0012);
       this.zoom = Math.max(0.5, Math.min(6, this.zoom * k));
       if (this.goal) this.goal.zoom = Math.max(0.5, Math.min(6, this.goal.zoom * k));

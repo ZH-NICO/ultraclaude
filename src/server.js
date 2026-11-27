@@ -258,7 +258,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       }
       if (route === 'GET /api/brain/chat') return send(res, 200, brainChat.view());
       if (route === 'GET /api/brain/saved') return send(res, 200, { tags: brainTags.all(), views: brainTags.data.views, types: bq.TYPES, dimensions: bq.DIMENSIONS });
-      const ask = /^\/api\/brain\/(table|pivot|timeline|storage|duplicates)$/.exec(url.pathname);
+      const ask = /^\/api\/brain\/(table|points|pivot|timeline|storage|duplicates)$/.exec(url.pathname);
       if (req.method === 'POST' && ask) {
         if (fileIndex.state !== 'ready') return send(res, 409, { error: 'The files are still being read. One moment.' });
         return send(res, 200, { ...bq[ask[1]](fileIndex, brainTags, await readBody(req)), measured: fileIndex.measured });

@@ -103,10 +103,10 @@ function brainViews() {
     query: () => $('mapFilter').value.trim(),
     setQuery: (q) => { $('mapFilter').value = q; syncBrain(); },
     showPaths: (paths, label) => { if (!brain) return; if (!paths) { brain.overview(); $('brainStatus').dataset.label = ''; } else brain.show(paths); syncBrainStatus(label); },
+    brain: () => brain,
     pickFile: (p) => { chatPick = { file: p }; setSide('details'); renderChatDetail(); },
     askAbout,
     planned: (plan) => { onBrainChat(plan); setSide('ask'); toast('The plan is on the right. Nothing moves until you apply it.'); },
-    brainShown: (shown) => { if (!brain) return; if (shown && S.view === 'map') { brain.start(); brain.draw(); } else brain.stop(); for (const id of ['brainLegend', 'brainStats', 'brainStatus']) $(id).style.visibility = shown ? '' : 'hidden'; },
   });
   return views;
 }
@@ -126,6 +126,7 @@ const loadChats = guard(async () => {
       onPickFile: (p) => { chatPick = { file: p }; setSide('details'); renderChatDetail(); },
     });
     $('brainCanvas').view = brain; // lets the browser tests find a point on screen
+    brain.onBox = (paths) => brainViews().picked(paths);
     new ResizeObserver(() => { if (S.view === 'map') brain.draw(); }).observe($('mapStage'));
   }
   const [chats, files, talk] = await Promise.all([
@@ -150,15 +151,16 @@ const loadChats = guard(async () => {
   syncBrain();
   brainViews().home = brainIndex.home;
   await views.loadSaved();
-  if (S.view === 'map' && views.view === 'brain') brain.start(); else views.refresh();
+  if (S.view === 'map') brain.start();
+  views.refresh();
 });
 
 /** The index changed (built, rebuilt or files moved): draw it anew. */
-const reloadFiles = guard(async () => {
+const reloadFiles = guard(async (moved) => {
   const files = await api('GET', '/api/brain');
   brainIndex = files;
   brainFiles = files.files ? files : null;
-  if (brain && chatData) { brain.setData(chatData, brainFiles); syncBrain(); if (views && (views.view !== 'brain' || views.filtering)) views.refresh(); }
+  if (brain && chatData) { brain.setData(chatData, brainFiles, moved); syncBrain(); views?.refresh(); }
 });
 
 function syncBrain() {
@@ -305,7 +307,8 @@ function richText(text) {
 
 function planCard(it) {
   const shown = it.moves.slice(0, 12);
-  const act = (what) => guard(async () => { await api('POST', `/api/brain/plans/${it.id}/${what}`, {}); if (what !== 'discard') reloadFiles(); });
+  // after a move the dots fly from their old folder to the new one
+  const act = (what) => guard(async () => { const p = await api('POST', `/api/brain/plans/${it.id}/${what}`, {}); if (what === 'discard') return; brain && (brain.arcs = null); const done = p.done || []; reloadFiles(what === 'undo' ? done.map((m) => ({ from: m.to, to: m.from })) : done); });
   return h('div', { class: `plan ${it.state}` },
     h('p', { class: 'plan-head' }, h('b', {}, `${it.moves.length} ${it.moves.length === 1 ? 'move' : 'moves'}`), ` · ${{ pending: 'waiting for you', applied: 'done', discarded: 'discarded', undone: 'undone' }[it.state]}`),
     it.reason ? h('p', { class: 'plan-why' }, it.reason) : null,
@@ -313,7 +316,7 @@ function planCard(it) {
     it.moves.length > shown.length ? h('p', { class: 'fine' }, `and ${it.moves.length - shown.length} more`) : null,
     it.failed?.length ? h('p', { class: 'form-error' }, `${it.failed.length} could not be moved: ${it.failed.slice(0, 2).map((f) => f.error).join('; ')}`) : null,
     h('div', { class: 'row-btns' },
-      h('button', { type: 'button', class: 'btn', onclick: () => { brain?.show(it.moves.map((m) => (it.state === 'applied' ? m.to : m.from))); syncBrainStatus('the plan'); } }, 'Show'),
+      h('button', { type: 'button', class: 'btn', onclick: () => { if (views && views.view !== 'brain') views.open('brain', { filter: {} }); setTimeout(() => { brain?.showMoves(it.moves, it.state === 'applied'); syncBrainStatus('the plan'); }, 60); } }, 'Show'),
       it.state === 'pending' ? h('button', { type: 'button', class: 'btn primary', onclick: act('apply') }, `Apply ${it.moves.length} ${it.moves.length === 1 ? 'move' : 'moves'}`) : null,
       it.state === 'pending' ? h('button', { type: 'button', class: 'btn', onclick: act('discard') }, 'Discard') : null,
       it.state === 'applied' ? h('button', { type: 'button', class: 'btn', onclick: act('undo') }, 'Undo') : null));
@@ -322,7 +325,7 @@ function planCard(it) {
 function askItem(it) {
   if (it.kind === 'user') return h('div', { class: 'msg user' }, ...richText(it.text));
   if (it.kind === 'text') return h('div', { class: 'msg bot' }, ...richText(it.text));
-  if (it.kind === 'action') return h('button', { type: 'button', class: 'chip', title: it.view ? 'Open this view' : 'Show these in the brain', onclick: () => { if (it.view) return brainViews().open(it.view.view, it.view); brainViews().open('brain', { filter: {} }); if (brain?.show(it.paths)) syncBrainStatus(it.text); } }, h('i'), it.text);
+  if (it.kind === 'action') return h('button', { type: 'button', class: 'chip', title: it.view ? 'Open this view' : 'Show these in the brain', onclick: () => { if (it.view) return brainViews().open(it.view.view, { ...it.view, by: 'Claude' }); brainViews().open('brain', { filter: {} }); setTimeout(() => { if (brain?.show(it.paths)) syncBrainStatus(it.text); }, 60); } }, h('i'), it.text);
   if (it.kind === 'tool') return h('p', { class: 'tool' }, it.text);
   if (it.kind === 'error') return h('p', { class: 'msg error' }, it.text);
   if (it.kind === 'plan') return planCard(it);
@@ -1269,7 +1272,7 @@ function connect() {
     else if (m.t === 'brainbusy') { ask.busy = m.busy; renderAsk(); }
     else if (m.t === 'brainreset') { ask.items = []; renderAsk(); }
     else if (m.t === 'brainshow') { if (brain && S.view === 'map' && (!views || views.view === 'brain') && brain.show(m.paths)) syncBrainStatus(m.label); }
-    else if (m.t === 'brainview') { if (S.view === 'map') brainViews().open(m.view.view, m.view); }
+    else if (m.t === 'brainview') { if (S.view === 'map') brainViews().open(m.view.view, { ...m.view, by: 'Claude' }); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
   ws.onclose = (ev) => {
@@ -2099,7 +2102,8 @@ $('updateBtn').addEventListener('click', guard(async () => {
 $('newBtn').addEventListener('click', runUpdate);
 setInterval(() => { if (!halted && !S.user?.guest) lookForUpdate(); }, 3600e3);
 $('mapFilter').addEventListener('input', () => { syncBrain(); clearTimeout(S.searchTimer); S.searchTimer = setTimeout(() => { if (views) { views.table.offset = 0; views.bar(); views.refresh(); } }, 250); });
-$('mapFilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && views?.view === 'brain') views.open('table'); });
+$('mapFilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') views?.open('table'); });
+document.addEventListener('keydown', (ev) => { if (ev.key !== 'Escape' || S.view !== 'map' || !views || ev.defaultPrevented) return; if (views.drawer) views.closeDrawer(); else if (views.view !== 'brain') views.back(); });
 document.addEventListener('keydown', (ev) => { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k' && S.view === 'map') { ev.preventDefault(); $('mapFilter').focus(); $('mapFilter').select(); } });
 $('sideTabs').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-side]'); if (b) setSide(b.dataset.side); });
 $('askForm').addEventListener('submit', (ev) => { ev.preventDefault(); sendAsk(); });
