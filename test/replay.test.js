@@ -48,11 +48,11 @@ test('every event is recorded in the project folder and comes back after a resta
   assert.equal(lines[0].text, 'now: Running the suite');
 
   const call = async (url, headers = {}) => (await fetch(`http://127.0.0.1:${app.port}${url}`, { headers: { 'x-uc-token': app.token, ...headers } }));
-  assert.equal((await call('/api/replay')).status, 401, 'a signed-in account is needed');
-  const all = await (await call('/api/replay', { cookie: app.cookie })).json();
+  assert.equal((await call('/api/replay', { 'x-uc-token': 'wrong' })).status, 403, 'only the window, which knows the address secret');
+  const all = await (await call('/api/replay')).json();
   assert.equal(all.events.length, 2);
   assert.equal(all.first, lines[0].ts);
-  assert.equal((await (await call(`/api/replay?since=${lines[1].ts + 1}`, { cookie: app.cookie })).json()).events.length, 0);
+  assert.equal((await (await call(`/api/replay?since=${lines[1].ts + 1}`, {})).json()).events.length, 0);
   await app.close();
 
   fs.appendFileSync(file, '{"half a line');

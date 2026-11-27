@@ -17,7 +17,7 @@ test('notes and folders can be managed from the Memory view', async (t) => {
   const { project } = app;
   const mem = `${project.vault.rel(project.vault.projectDir)}/Memory`;
   const call = async (method, url, body) => {
-    const res = await fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+    const res = await fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
     return { status: res.status, ...(await res.json()) };
   };
   const file = (rel) => path.join(vault, ...rel.split('/'));

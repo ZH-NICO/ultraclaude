@@ -15,8 +15,7 @@ import { claudeProjectDir, listAllProjects } from './history.js';
 import { codeVersion } from './version.js';
 import { handleMcp } from './mcp.js';
 import { loadConfig, HOME_DIR } from './config.js';
-import { Accounts, AuthError } from './accounts.js';
-import { Google } from './google.js';
+import { Profile } from './profile.js';
 import { usageReport } from './usage.js';
 import { Guard } from './guard.js';
 import * as git from './git.js';
@@ -26,14 +25,12 @@ import { BrainChat } from './brainchat.js';
 import * as bq from './brainquery.js';
 import { checkUpdate, installUpdate } from './update.js';
 
-const COOKIE = 'uc_session';
 const RANGES = ['today', '7d', '30d', 'all'];
 // What the browser may load: only this server. Inline styles are needed by the terminal and the graph.
 const SECURITY = {
   'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin',
 };
-const equal = (a, b) => typeof a === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -100,14 +97,10 @@ function knownToObsidian(dir) {
   }
 }
 
-export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false, usersFile = path.join(HOME_DIR, 'users.json'), googleFetch = fetch, googleFiles = [path.join(path.dirname(usersFile), 'google.json'), path.join(ROOT, 'google.json')] } = {}) {
+export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false, profileFile = path.join(HOME_DIR, 'profile.json') } = {}) {
   const project = new Project({ dir, vaultPath });
-  const accounts = new Accounts(usersFile);
-  const google = new Google({ accounts, files: googleFiles, get: googleFetch });
+  const profile = new Profile(profileFile);
   const token = crypto.randomBytes(18).toString('hex'); // in the window's address; every API call needs it
-  const cliKey = crypto.randomBytes(18).toString('hex'); // only in server.json, so only the command line can stop or restart the server
-  const sessionOf = (req) => accounts.fromCookie(req.headers.cookie, COOKIE);
-  const cookie = (value, maxAge) => `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
   const version = process.env.ULTRACLAUDE_TEST_VERSION || codeVersion(); // the code this server runs
   const clients = new Set();
   const broadcast = (msg) => {
@@ -124,12 +117,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   project.on('sessions', () => broadcast({ t: 'sessions', sessions: project.sessions() }));
   project.on('missions', (missions) => broadcast({ t: 'missions', missions }));
   project.on('missionTasks', () => { if (project.state.missions?.length) broadcast({ t: 'missions', missions: missionViews(project) }); });
-  // the cost guard lives next to the accounts, so tests with their own accounts file get their own guard
-  const costGuard = new Guard({ file: path.join(path.dirname(usersFile), 'guard.json'), project, report: () => usageReport({ range: 'today', blockLimit: costGuard.config.limit }) });
+  // the cost guard lives next to the profile, so tests with their own profile file get their own guard
+  const costGuard = new Guard({ file: path.join(path.dirname(profileFile), 'guard.json'), project, report: () => usageReport({ range: 'today', blockLimit: costGuard.config.limit }) });
   costGuard.on('change', (guard) => broadcast({ t: 'guard', guard }));
   // the brain: an index of all file names on this computer, and a Claude chat that finds and sorts them
-  const fileIndex = new FileIndex({ journal: path.join(path.dirname(usersFile), 'brain-moves.jsonl') });
-  const brainTags = new bq.Tags(path.join(path.dirname(usersFile), 'brain-tags.json'));
+  const fileIndex = new FileIndex({ journal: path.join(path.dirname(profileFile), 'brain-moves.jsonl') });
+  const brainTags = new bq.Tags(path.join(path.dirname(profileFile), 'brain-tags.json'));
   const brainChat = new BrainChat({ index: fileIndex, endpoint: () => project.endpoint, dataDir: project.dataDir, tags: brainTags });
   brainChat.on('view', (view) => broadcast({ t: 'brainview', view }));
   fileIndex.on('status', (status) => broadcast({ t: 'brainindex', status }));
@@ -142,86 +135,6 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', ...SECURITY, ...headers });
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
-  /** Closes the live connections of the sessions that gone picks out (they were signed out). */
-  const dropSockets = (gone) => { for (const ws of clients) if (gone(ws.session)) ws.close(4401, 'signed out'); };
-
-  async function authRoute(req, res, url, route) {
-    const body = req.method === 'GET' || req.method === 'DELETE' ? {} : await readBody(req);
-    const meta = { agent: req.headers['user-agent'] };
-    const signedIn = (user) => { const s = accounts.start(user, meta); return { cookie: cookie(s.token, s.maxAge) }; };
-    if (route === 'GET /api/auth/me') {
-      const who = sessionOf(req);
-      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), guestAllowed: accounts.allowGuest, google: !!google.config(), version });
-    }
-    if (route === 'POST /api/auth/guest') {
-      accounts.brake('guest');
-      const g = accounts.startGuest(meta);
-      return send(res, 200, { user: accounts.publicUser(accounts.guestUser) }, { 'set-cookie': cookie(g.token, g.maxAge) });
-    }
-    if (route === 'POST /api/auth/google/start') {
-      accounts.brake('google');
-      const mine = sessionOf(req);
-      return send(res, 200, google.start({ port: server.address().port, link: mine && !mine.user.guest ? mine.user : null }));
-    }
-    if (route === 'POST /api/auth/google/finish') {
-      const r = google.finish(String(body.handle || ''));
-      if (r.pending) return send(res, 200, { pending: true });
-      const mine = sessionOf(req);
-      // connecting from the settings keeps the session; signing in opens one
-      const headers = r.link && mine?.user === r.user ? {} : { 'set-cookie': signedIn(r.user).cookie };
-      return send(res, 200, { user: accounts.publicUser(r.user) }, headers);
-    }
-    if (route === 'POST /api/auth/signup') {
-      accounts.brake('signup');
-      const user = await accounts.signup(body);
-      return send(res, 200, { user: accounts.publicUser(user) }, { 'set-cookie': signedIn(user).cookie });
-    }
-    if (route === 'POST /api/auth/login') {
-      const { user, token: t, maxAge } = await accounts.login(body.email, body.password, meta);
-      return send(res, 200, { user: accounts.publicUser(user) }, { 'set-cookie': cookie(t, maxAge) });
-    }
-    const who = sessionOf(req);
-    if (!who) return send(res, 401, { error: 'Please sign in.' });
-    const { user, session } = who;
-    // a guest has no account: only sign out and the look of the window
-    if (user.guest && route !== 'POST /api/auth/logout' && route !== 'PATCH /api/auth/prefs') return send(res, 403, { error: 'Create an account to use this.' });
-    if (route === 'PATCH /api/auth/guest-setting') {
-      accounts.allowGuest = !!body.allow;
-      dropSockets((s) => s.userId === 'guest');
-      return send(res, 200, { guestAllowed: accounts.allowGuest });
-    }
-    if (route === 'POST /api/auth/logout') {
-      accounts.logout(session);
-      dropSockets((s) => s === session);
-      return send(res, 200, { ok: true }, { 'set-cookie': cookie('', 0) });
-    }
-    if (route === 'PATCH /api/auth/profile') return send(res, 200, { user: accounts.publicUser(await accounts.updateProfile(user, body)) });
-    if (route === 'PATCH /api/auth/prefs') {
-      const out = accounts.publicUser(accounts.setPrefs(user, body));
-      if (body.blockLimit !== undefined && !user.guest) await costGuard.update({ limit: out.prefs.blockLimit ?? null }).catch(() => {}); // the window limit is the guard's limit too
-      return send(res, 200, { user: out });
-    }
-    if (route === 'POST /api/auth/password') {
-      await accounts.changePassword(user, body.current, body.next, session);
-      dropSockets((s) => s.userId === user.id && s !== session);
-      return send(res, 200, { ok: true });
-    }
-    if (route === 'GET /api/auth/sessions') return send(res, 200, { sessions: accounts.sessionsOf(user, session) });
-    if (route === 'POST /api/auth/sessions/revoke-others') { accounts.revokeOthers(user, session); dropSockets((s) => s.userId === user.id && s !== session); return send(res, 200, { ok: true }); }
-    const one = /^\/api\/auth\/sessions\/([0-9a-f]+)$/.exec(url.pathname);
-    if (req.method === 'DELETE' && one) {
-      accounts.revoke(user, one[1]);
-      dropSockets((s) => s.userId === user.id && s.id === one[1]);
-      return send(res, 200, { ok: true });
-    }
-    if (route === 'DELETE /api/auth/account') {
-      await accounts.deleteAccount(user, body.password);
-      dropSockets((s) => s.userId === user.id);
-      return send(res, 200, { ok: true }, { 'set-cookie': cookie('', 0) });
-    }
-    return send(res, 404, { error: 'Not found' });
-  }
-
   let closing = false;
   let guardTimer = null;
   const close = async () => {
@@ -238,15 +151,16 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
 
   async function api(req, res, url) {
     const route = `${req.method} ${url.pathname}`;
-    if (url.pathname.startsWith('/api/auth/')) return authRoute(req, res, url, route);
-    // Everything else needs a signed-in account. The command line may only read the state and stop the
-    // server, with a key that exists only in server.json.
-    const cli = equal(req.headers['x-uc-cli'], cliKey) && (route === 'POST /api/shutdown' || route === 'GET /api/state');
-    const who = sessionOf(req);
-    if (!who && !cli) return send(res, 401, { error: 'Please sign in.' });
+    if (route === 'GET /api/profile') return send(res, 200, { user: profile.view(), suggest: profile.view() ? null : profile.suggestion(), version });
+    if (route === 'POST /api/profile') return send(res, 200, { user: profile.save(await readBody(req)) });
+    if (route === 'PATCH /api/profile/prefs') {
+      const b = await readBody(req);
+      const user = profile.setPrefs(b);
+      if (b.blockLimit !== undefined) await costGuard.update({ limit: user.prefs.blockLimit }).catch(() => {}); // the window limit is the guard's limit too
+      return send(res, 200, { user });
+    }
     if (route === 'GET /api/update') return send(res, 200, await checkUpdate({ fresh: url.searchParams.get('fresh') === '1' }));
     if (route === 'POST /api/update') {
-      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       return send(res, 200, await installUpdate());
     }
     if (route === 'GET /api/graph') return send(res, 200, project.vault.graph());
@@ -259,7 +173,6 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         return send(res, 200, { repo: true, worktrees: list.map((w) => ({ ...w, agent: w.main ? '' : owner(w) })) });
       }
       if (route === 'GET /api/changes/diff') return send(res, 200, await git.diff(project.dir, url.searchParams.get('path')));
-      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       const b = await readBody(req);
       if (route === 'POST /api/changes/commit') { await git.commitAll(project.dir, b.path, b.message); project.event('git', 'user', `committed in ${path.basename(String(b.path))}: ${b.message || 'Work from UltraClaude'}`); return send(res, 200, { ok: true }); }
       if (route === 'POST /api/changes/merge') { const r = await git.merge(project.dir, b.path); project.event('git', 'user', `merged ${path.basename(String(b.path))} into ${r.into}`); return send(res, 200, r); }
@@ -278,7 +191,6 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         if (fileIndex.state !== 'ready') return send(res, 409, { error: 'The files are still being read. One moment.' });
         return send(res, 200, { ...bq[ask[1]](fileIndex, brainTags, await readBody(req)), measured: fileIndex.measured });
       }
-      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       const b = await readBody(req);
       if (route === 'POST /api/brain/rescan') { if (fileIndex.state !== 'indexing') fileIndex.build(); return send(res, 200, fileIndex.status()); }
       if (route === 'POST /api/brain/chat') {
@@ -315,13 +227,11 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       return send(res, 404, { error: 'Not found' });
     }
     if (route === 'POST /api/missions' || /^\/api\/missions\/[0-9a-f]+\/stop$/.test(url.pathname)) {
-      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       if (route === 'POST /api/missions') return send(res, 200, startMission(project, await readBody(req)));
       return send(res, 200, stopMission(project, url.pathname.split('/')[3]));
     }
     if (route === 'GET /api/guard') return send(res, 200, costGuard.view());
     if (route === 'PATCH /api/guard' || route === 'POST /api/guard/resume') {
-      if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       return send(res, 200, route === 'PATCH /api/guard' ? await costGuard.update(await readBody(req)) : await costGuard.resume());
     }
     if (route === 'GET /api/replay') {
@@ -331,7 +241,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     }
     if (route === 'GET /api/usage') {
       const range = RANGES.includes(url.searchParams.get('range')) ? url.searchParams.get('range') : '30d';
-      return send(res, 200, await usageReport({ range, blockLimit: who.user.prefs.blockLimit, fresh: url.searchParams.get('fresh') === '1' }));
+      return send(res, 200, await usageReport({ range, blockLimit: profile.view()?.prefs.blockLimit ?? null, fresh: url.searchParams.get('fresh') === '1' }));
     }
     const paste = req.method === 'POST' && /^\/api\/agents\/([^/]+)\/paste-image$/.exec(url.pathname);
     if (paste) {
@@ -447,13 +357,6 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         const out = parts[0] === 'hook' ? project.handleHook(parts[2], body) : parts[2] === 'brain' ? brainChat.mcp(body) : handleMcp(project, parts[2], body);
         return out ? send(res, 200, out) : send(res, parts[0] === 'mcp' ? 202 : 200);
       }
-      if (url.pathname === '/auth/google/callback' && req.method === 'GET') {
-        // Google sends the browser here. No address token: the one-time state is what proves this sign-in was started here.
-        const r = await google.callback(url.searchParams);
-        const text = String(r.message).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-        res.writeHead(r.ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SECURITY });
-        return res.end(`<!doctype html><meta charset="utf-8"><title>UltraClaude</title><body style="margin:0;height:100vh;display:grid;place-items:center;background:#000;color:#fff;font:16px system-ui;text-align:center;padding:24px"><div><h1 style="font-size:22px">${r.ok ? 'Signed in' : 'Not signed in'}</h1><p>${text}</p></div>`);
-      }
       if (parts[0] === 'api') {
         if (url.pathname === '/api/ping') return send(res, 200, { ok: true, dir: project.dir, version });
         if (req.headers['x-uc-token'] !== token) return send(res, 403, { error: 'Forbidden' });
@@ -468,8 +371,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
       fs.createReadStream(file).pipe(res);
     } catch (err) {
       if (res.headersSent) return;
-      const known = err instanceof AuthError;
-      send(res, known ? err.status : 400, { error: err.message, ...(err.retryAfter ? { retryAfter: err.retryAfter } : {}) }, err.retryAfter ? { 'retry-after': String(err.retryAfter) } : {});
+      send(res, 400, { error: err.message });
     }
   });
 
@@ -477,11 +379,9 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     const host = (req.headers.host || '').split(':')[0];
-    const who = sessionOf(req);
-    // only this server's own page may connect (the Origin check stops other websites), and only when signed in
-    if (url.pathname !== '/ws' || url.searchParams.get('t') !== token || !['127.0.0.1', 'localhost'].includes(host) || req.headers.origin !== `http://${req.headers.host}` || !who) return socket.destroy();
+    // only this server's own page may connect: it knows the address secret, and the Origin check stops other websites
+    if (url.pathname !== '/ws' || url.searchParams.get('t') !== token || !['127.0.0.1', 'localhost'].includes(host) || req.headers.origin !== `http://${req.headers.host}`) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => {
-      ws.session = who.session;
       clients.add(ws);
       for (const [id, r] of project.runtime) if (r.buffer) ws.send(JSON.stringify({ t: 'replay', id, d: r.buffer }));
       ws.on('message', (raw) => {
@@ -508,7 +408,7 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   guardTimer.unref();
   setTimeout(() => { if (!closing) costGuard.tick(); }, 5_000).unref();
   const info = { port: actualPort, token, pid: process.pid, url: `http://127.0.0.1:${actualPort}/?t=${token}` };
-  fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify({ ...info, cliKey }), { mode: 0o600 });
+  fs.writeFileSync(path.join(project.dataDir, 'server.json'), JSON.stringify(info), { mode: 0o600 });
 
   if (autoExit) {
     // Stop the background server once the window is closed and no agent is running any more.

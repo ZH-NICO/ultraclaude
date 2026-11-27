@@ -17,7 +17,7 @@ test('image paste is saved and typed into the prompt as a bracketed paste', asyn
   project.startAgent = async () => {};
   const agent = project.createAgent({ roleId: 'tester' });
   const typed = [];
-  const post = (id, body, type) => fetch(`http://127.0.0.1:${app.port}/api/agents/${id}/paste-image`, { method: 'POST', headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': type }, body });
+  const post = (id, body, type) => fetch(`http://127.0.0.1:${app.port}/api/agents/${id}/paste-image`, { method: 'POST', headers: { 'x-uc-token': app.token, 'content-type': type }, body });
   const png = Buffer.from('89504e470d0a1a0a', 'hex');
 
   let res = await post(agent.id, png, 'image/png');

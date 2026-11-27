@@ -24,7 +24,7 @@ const norm = (p) => String(p || '').replace(/[\\/]+$/, '').toLowerCase();
 const inside = (dir, base) => dir === base || dir.startsWith(`${base}\\`) || dir.startsWith(`${base}/`);
 const month = (t) => { if (!t) return 'unknown'; const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 
-/** Tags on files and saved views, kept in one small file next to the accounts. */
+/** Tags on files and saved views, kept in one small file next to the profile. */
 export class Tags {
   constructor(file) {
     this.file = file;

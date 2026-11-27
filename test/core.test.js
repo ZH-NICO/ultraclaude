@@ -49,7 +49,7 @@ test('server: API, MCP tools, messages, tasks and hooks', async (t) => {
   const { project } = app;
   project.startAgent = async () => {}; // never spawn a real Claude in tests
   const base = `http://127.0.0.1:${app.port}`;
-  const api = (method, url, body) => fetch(base + url, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+  const api = (method, url, body) => fetch(base + url, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
 
   assert.equal((await fetch(`${base}/api/state`)).status, 403, 'API needs the token');
   assert.equal((await fetch(`${base}/`)).status, 200);

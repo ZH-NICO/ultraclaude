@@ -64,7 +64,7 @@ test('sessions and Claude Code memory of a folder show up and can be continued',
   const { project } = app;
   const startedWith = [];
   project.startAgent = async (id) => { startedWith.push(project.agent(id)); };
-  const api = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
+  const api = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) }).then((r) => r.json());
 
   // memory: mirrored into the vault, counted, searchable by agents, index file left out
   const mirror = path.join(project.vault.projectDir, 'Claude Code');
@@ -112,7 +112,7 @@ test('the map lists every folder Claude Code worked in, and only those can be op
 
   const app = await startTest({ dir: here, vaultPath: tmp('v2') });
   t.after(() => app.close());
-  const call = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, cookie: app.cookie, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
+  const call = (method, url, body) => fetch(`http://127.0.0.1:${app.port}${url}`, { method, headers: { 'x-uc-token': app.token, 'content-type': 'application/json' }, body: body && JSON.stringify(body) });
   const { projects } = await (await call('GET', '/api/chats')).json();
   const mine = projects.find((p) => p.current);
   assert.equal(mine.dir, here);
@@ -131,7 +131,7 @@ test('the map can list the subfolders of any folder', async (t) => {
   fs.writeFileSync(path.join(dir, 'readme.md'), 'x');
   const app = await startTest({ dir: tmp('host'), vaultPath: tmp('v3') });
   t.after(() => app.close());
-  const get = (p) => fetch(`http://127.0.0.1:${app.port}/api/dirs?path=${encodeURIComponent(p)}`, { headers: { 'x-uc-token': app.token, cookie: app.cookie } });
+  const get = (p) => fetch(`http://127.0.0.1:${app.port}/api/dirs?path=${encodeURIComponent(p)}`, { headers: { 'x-uc-token': app.token } });
   assert.deepEqual((await (await get(dir)).json()).dirs, ['docs', 'Lib 9', 'Lib 10', 'src'], 'folders only, hidden ones left out, natural order');
   assert.equal((await get(path.join(dir, 'nope'))).status, 404);
   assert.equal((await get('relative/path')).status, 404);

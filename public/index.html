@@ -15,33 +15,18 @@
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 10V3.4M10 10l5.7 3.3M10 10l-5.7 3.3" stroke="currentColor" stroke-width="1.2"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/><circle cx="10" cy="3.4" r="1.7" fill="currentColor"/><circle cx="15.7" cy="13.3" r="1.7" fill="currentColor"/><circle cx="4.3" cy="13.3" r="1.7" fill="currentColor"/></svg>
         ultraclaude
       </div>
-      <h1 id="authTitle">Sign in</h1>
-      <p class="auth-sub" id="authSub"></p>
+      <h1>Welcome</h1>
+      <p class="auth-sub">Tell UltraClaude who you are. That is all.</p>
       <form id="authForm" novalidate>
-        <div class="two" id="nameFields" hidden>
+        <div class="two">
           <label class="field"><span>First name</span><input id="aFirst" autocomplete="given-name" maxlength="50"></label>
           <label class="field"><span>Last name</span><input id="aLast" autocomplete="family-name" maxlength="50"></label>
         </div>
-        <label class="field"><span>Email</span><input id="aEmail" type="email" autocomplete="email" maxlength="254" spellcheck="false"></label>
-        <label class="field"><span>Password</span>
-          <span class="pw"><input id="aPass" type="password" autocomplete="current-password" maxlength="200"><button type="button" class="link" id="aShow" aria-pressed="false">Show</button></span>
-        </label>
-        <p class="hint" id="pwHint" hidden></p>
+        <label class="field"><span>Date of birth</span><input id="aBirth" type="date" min="1900-01-01" autocomplete="bday"></label>
         <p class="form-error" id="authError" role="alert" hidden></p>
-        <button class="btn primary wide" id="authGo">Sign in</button>
+        <button class="btn primary wide" id="authGo">Start</button>
       </form>
-      <div class="auth-google">
-        <div class="or"><span>or</span></div>
-        <button type="button" class="btn wide" id="googleGo"><svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true"><path fill="#4285F4" d="M17.6 9.2c0-.6-.1-1.2-.2-1.8H9v3.5h4.8a4.1 4.1 0 0 1-1.8 2.7v2.2h2.9c1.7-1.6 2.7-3.9 2.7-6.6z"/><path fill="#34A853" d="M9 18c2.4 0 4.5-.8 6-2.2l-2.9-2.2a5.4 5.4 0 0 1-8.1-2.9H1v2.3A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M4 10.7a5.4 5.4 0 0 1 0-3.4V5H1a9 9 0 0 0 0 8z"/><path fill="#EA4335" d="M9 3.6c1.3 0 2.5.5 3.4 1.3L15 2.3A9 9 0 0 0 1 5l3 2.3A5.4 5.4 0 0 1 9 3.6z"/></svg>Continue with Google</button>
-        <p class="hint" id="googleHint" role="status" hidden></p>
-      </div>
-      <div class="auth-guest" id="guestBox" hidden>
-        <div class="or"><span>or</span></div>
-        <button type="button" class="btn wide" id="guestGo">Continue without signing in</button>
-        <p class="hint">As a guest you have no account: no photo, no saved settings and no account tools.</p>
-      </div>
-      <p class="auth-switch"><span id="authSwitchText"></span> <button type="button" class="link" id="authSwitch"></button></p>
-      <p class="auth-foot">Your account is stored on this computer only. Passwords are never saved, only a salted hash.</p>
+      <p class="auth-foot">This stays on your computer only.</p>
     </div>
   </div>
 
@@ -345,16 +330,13 @@
         <button type="button" data-tab="profile" class="active">Profile</button>
         <button type="button" data-tab="appearance">Appearance</button>
         <button type="button" data-tab="usage">Usage</button>
-        <button type="button" data-tab="security">Security</button>
         <button type="button" data-tab="about">About</button>
-        <button type="button" class="link signout" id="signOut">Sign out</button>
       </nav>
       <div class="set-body" id="setBody">
         <button type="button" class="set-close" id="setClose" aria-label="Close settings">×</button>
         <section class="tab" id="tab-profile"></section>
         <section class="tab" id="tab-appearance" hidden></section>
         <section class="tab" id="tab-usage" hidden></section>
-        <section class="tab" id="tab-security" hidden></section>
         <section class="tab" id="tab-about" hidden></section>
       </div>
     </div>

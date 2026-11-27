@@ -14,7 +14,7 @@
   <a href="#your-whole-computer-in-one-brain">Brain</a> ·
   <a href="#shared-memory">Memory</a> ·
   <a href="#keyboard">Keyboard</a> ·
-  <a href="#your-account">Account</a> ·
+  <a href="#your-profile">Profile</a> ·
   <a href="#usage">Usage</a> ·
   <a href="#how-it-works">How it works</a>
 </p>
@@ -34,17 +34,6 @@ UltraClaude opens as many Claude Code sessions as you want for the same project 
 <p align="center">
   <img src="docs/features.svg" alt="Roles, one shared memory, agents that talk, a map of every chat, Ctrl+V for screenshots, a prompt that stays put" width="100%">
 </p>
-
-## Sign in with Google
-
-The sign-in screen has **Continue with Google**. Google only allows this for an app that is registered with it, so set it up once (about five minutes, free):
-
-1. Open the [Google Cloud console](https://console.cloud.google.com/apis/credentials) and create a project.
-2. *OAuth consent screen*: choose **External**, give it a name and your email. While it is in *Testing*, add the Google accounts that may sign in under **Test users** (or publish it).
-3. *Credentials → Create credentials → OAuth client ID*, type **Desktop app**. Download the JSON.
-4. Save that file as `google.json` in UltraClaude's folder in your home directory: `~/.ultraclaude/google.json` (Windows: `C:\\Users\\<you>\\.ultraclaude\\google.json`). No restart needed.
-
-UltraClaude asks Google only for your name and email address. A Google sign-in makes its own account on your computer. If you already have an account with the same email, sign in with your password first and choose **Connect Google** under *Settings → Security*.
 
 ## Updating
 
@@ -205,34 +194,15 @@ The terminals behave like Windows Terminal.
 
 The prompt and status line stay at the bottom while you scroll the chat with the mouse wheel (Claude Code's fullscreen rendering). To turn that off, set `"tui"` to something other than `"fullscreen"` in your Claude Code settings.
 
-## Your account
+## Your profile
 
-The window asks you to sign in. The first time you create an account with your name, email and a password. After that you sign in with email and password.
+The first time, the window asks for your first name, last name and date of birth. After that it opens straight away. There is no account, password or sign-in. Change your details, add a photo and set the look of the window under the button at the bottom left.
 
-Below the form, **Continue without signing in** opens the window as a guest. A guest has no account: no photo, no saved settings and no access to account tools, and the session ends after 12 hours of not using it. Anyone who can open the window can do this, so if you want a real sign-in every time, turn it off under **Settings → Security → Sign-in screen**.
+The profile is stored on your computer only, in `~/.ultraclaude/profile.json`.
 
-Bottom left in the sidebar is your profile: your photo (or initials) and your name. It opens **Settings**, a window in the middle of the screen:
+### What protects the window
 
-| Section | What it does |
-| --- | --- |
-| **Profile** | Photo, first and last name, email |
-| **Appearance** | Black or light theme, terminal text size, desktop notifications |
-| **Usage** | What your Claude Code chats used, see below |
-| **Security** | Change your password, see and end sessions on other devices, delete the account |
-| **About** | Version, project and vault paths, keyboard shortcuts |
-
-Accounts are stored on your computer only, in `~/.ultraclaude/users.json`. There is no server and no email, which also means a forgotten password cannot be reset by mail. If you lose it, delete that file and create the account again. Your projects and memory are not touched.
-
-### What protects it
-
-- Passwords are never stored, only a salted scrypt hash. Every account has its own salt, and the file is readable only by you.
-- After five wrong passwords an account is locked for a while, longer with every further try. An unknown email and a wrong password give the same answer.
-- A session lasts 30 days and lives in an `HttpOnly`, `SameSite=Strict` cookie, so scripts cannot read it and other websites cannot use it. Only a hash of the session key is kept on the computer.
-- Everything the window asks for needs a signed-in account, the live terminal connection included. The server listens on `127.0.0.1` only, every call carries a secret from the window's address, and the live connection also checks that it comes from the window itself.
-- The page may only load files from the server itself, and cannot be shown inside another site.
-- Changing the password signs out every other device. The command line (`ultraclaude stop` and the update restart) uses a separate key that only exists in `<project>/.ultraclaude/server.json`.
-
-This keeps other people, other websites and other programs in your browser out. It does not protect you from malware that runs as you on your computer: that can read your files, as it could for any program.
+Anyone who can use your computer account can open UltraClaude. Against everything else: the server listens on `127.0.0.1` only, every call carries a secret from the window's address, and the live connection also checks that it comes from the window's own page, so other websites cannot reach it.
 
 ## Usage
 
@@ -299,7 +269,7 @@ ultraclaude --no-open     start the server without a window
 ## Development
 
 ```bash
-npm test    # accounts, sign-in and who may connect, usage, vault, files, messages, tasks, hooks, MCP, sessions, the chat map and the HTTP API
+npm test    # the profile and who may connect, usage, vault, files, messages, tasks, hooks, MCP, sessions, the chat map and the HTTP API
 ```
 
 ```
@@ -307,7 +277,7 @@ bin/ultraclaude.js   command line
 src/server.js        HTTP, WebSocket, MCP endpoint and hook endpoint
 src/project.js       agents, messages, tasks, hook logic
 src/mcp.js           the team tools
-src/accounts.js      accounts, passwords, sessions
+src/profile.js       your name and date of birth
 src/usage.js         token usage read from Claude Code's history
 src/vault.js         the Obsidian vault and its files
 src/history.js       earlier Claude Code sessions, memory and every chat on the computer

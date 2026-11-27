@@ -43,7 +43,6 @@ const setAttr = (el, name, value) => { if (el.getAttribute(name) !== String(valu
 async function api(method, url, body) {
   const res = await fetch(url, { method, headers: { 'content-type': 'application/json', 'x-uc-token': TOKEN }, body: body ? JSON.stringify(body) : undefined });
   const json = await res.json().catch(() => ({}));
-  if (res.status === 401 && !url.startsWith('/api/auth/')) { location.reload(); throw new Error('Please sign in.'); } // the session ended
   if (!res.ok) throw new Error(json.error || res.statusText);
   return json;
 }
@@ -273,7 +272,7 @@ async function showPreview(p, meta, look) {
     meta.replaceChildren(h('dt', {}, 'Size'), h('dd', {}, bytes(v.size)), h('dt', {}, 'Modified'), h('dd', {}, day(v.mtime)));
     if (v.kind === 'image') look.replaceChildren(h('img', { src: v.data, alt: fileBase(p) }));
     else if (v.kind === 'text') look.replaceChildren(h('pre', {}, v.text, v.cut ? '\n…' : ''));
-  } catch { /* guests and files that are gone have no preview */ }
+  } catch { /* a file that is gone has no preview */ }
 }
 
 function openFolderButton(dir, name) {
@@ -1275,9 +1274,8 @@ function connect() {
     else if (m.t === 'brainview') { if (S.view === 'map') brainViews().open(m.view.view, { ...m.view, by: 'Claude' }); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
-  ws.onclose = (ev) => {
+  ws.onclose = () => {
     if (halted) return;
-    if (ev.code === 4401) return location.reload(); // signed out or removed elsewhere
     $('conn').classList.remove('on');
     setText($('connText'), 'reconnecting');
     setTimeout(reconnect, 1500);
@@ -1293,34 +1291,15 @@ function halt(title, text) {
 
 // ---------- account: sign in, profile, settings, usage ----------
 
-const AUTH_TEXT = {
-  login: { title: 'Sign in', sub: 'Use your UltraClaude account to open this window.', go: 'Sign in', ask: 'New here?', to: 'Create an account' },
-  signup: { title: 'Create your account', sub: 'One account on this computer. It protects the window and keeps your settings.', go: 'Create account', ask: 'Already have an account?', to: 'Sign in' },
-};
-let authMode = 'login';
+const welcomeError = (text) => { $('authError').hidden = !text; setText($('authError'), text); };
 
-const authError = (text) => { $('authError').hidden = !text; setText($('authError'), text); };
-
-function pwHint() {
-  const n = $('aPass').value.length;
-  $('pwHint').classList.toggle('ok', n >= 10);
-  setText($('pwHint'), n >= 10 ? 'Long enough. Avoid common words and your email.' : `At least 10 characters (${n}/10). A few random words make a strong password.`);
-}
-
-function showAuth(mode, notice = '') {
-  authMode = mode;
-  const t = AUTH_TEXT[mode];
+/** The first start: who are you? An account from an earlier version fills in the name. */
+function showWelcome(suggest) {
   document.body.classList.add('locked');
   $('auth').hidden = false;
-  setText($('authTitle'), t.title); setText($('authSub'), t.sub); setText($('authGo'), t.go);
-  setText($('authSwitchText'), t.ask); setText($('authSwitch'), t.to);
-  $('nameFields').hidden = mode !== 'signup';
-  $('guestBox').hidden = !S.guestAllowed;
-  $('pwHint').hidden = mode !== 'signup';
-  $('aPass').autocomplete = mode === 'signup' ? 'new-password' : 'current-password';
-  authError(notice);
-  pwHint();
-  $(mode === 'signup' ? 'aFirst' : 'aEmail').focus();
+  if (suggest) { $('aFirst').value = suggest.firstName || ''; $('aLast').value = suggest.lastName || ''; }
+  $('aBirth').max = new Date().toISOString().slice(0, 10);
+  $(suggest?.firstName ? 'aBirth' : 'aFirst').focus();
 }
 
 const initials = (u) => `${u.firstName[0] || ''}${u.lastName[0] || ''}`.toUpperCase();
@@ -1329,9 +1308,7 @@ const fillAvatar = (el, u) => el.replaceChildren(u.avatar ? h('img', { src: u.av
 function renderProfile() {
   fillAvatar($('profileAvatar'), S.user);
   setText($('profileName'), `${S.user.firstName} ${S.user.lastName}`.trim());
-  setText($('signOut'), S.user.guest ? 'End guest session' : 'Sign out');
-  $('setNav').querySelector('[data-tab=security]').hidden = !!S.user.guest;
-  $('profileBtn').title = `${S.user.email} · account and settings`;
+  $('profileBtn').title = 'Your profile and settings';
   $('profileBtn').hidden = false;
 }
 
@@ -1343,7 +1320,6 @@ function applyPrefs() {
 }
 
 function enterApp(user) {
-  googleRun++; // a Google sign-in still waiting is not needed any more
   S.user = user;
   applyPrefs();
   renderProfile();
@@ -1352,45 +1328,17 @@ function enterApp(user) {
   connect();
 }
 
-/**
- * Opens Google in the browser and waits until the server has the answer. `hint` is where to say what is
- * going on; resolves with the user. Starting again gives up the earlier attempt.
- */
-let googleRun = 0;
-async function googleSignIn(hint) {
-  const run = ++googleRun;
-  const { url, handle } = await api('POST', '/api/auth/google/start', {});
-  hint.hidden = false;
-  hint.replaceChildren('Finish signing in with Google in the browser window. Nothing opened? ', h('a', { class: 'link', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Google sign-in'));
-  window.open(url, '_blank', 'noopener');
-  while (run === googleRun) {
-    await new Promise((r) => setTimeout(r, 1200));
-    const r = await api('POST', '/api/auth/google/finish', { handle });
-    if (!r.pending) { hint.hidden = true; return r.user; }
-  }
-  return null;
-}
-
-/** Set by the Create an account button of the guest view, so the next page load opens the sign-up form. */
-const wantSignup = () => { try { const v = sessionStorage.getItem('uc-signup'); sessionStorage.removeItem('uc-signup'); return !!v; } catch { return false; } };
-
 async function boot() {
   try {
-    const me = await api('GET', '/api/auth/me');
-    S.guestAllowed = me.guestAllowed;
-    const signup = wantSignup(); // always read, so an old flag cannot turn up later
-    if (me.user) enterApp(me.user); else showAuth(me.accounts && !signup ? 'login' : 'signup');
+    const me = await api('GET', '/api/profile');
+    if (me.user) enterApp(me.user); else showWelcome(me.suggest);
   } catch (err) {
     halt('UltraClaude cannot be reached', err.message);
   }
 }
 
 async function reconnect() {
-  try {
-    const me = await api('GET', '/api/auth/me');
-    if (!me.user) return location.reload(); // signed out elsewhere: back to the sign-in screen
-    connect();
-  } catch { setTimeout(reconnect, 1500); }
+  try { await api('GET', '/api/profile'); connect(); } catch { setTimeout(reconnect, 1500); }
 }
 
 // ---- settings window ----
@@ -1401,7 +1349,7 @@ const money = (n) => (n >= 100 ? `$${Math.round(n).toLocaleString('en-US')}` : `
 const fmt = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)}K` : String(n));
 const left = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
 const hhmm = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-const savePrefs = async (patch) => { S.user = (await api('PATCH', '/api/auth/prefs', patch)).user; applyPrefs(); };
+const savePrefs = async (patch) => { S.user = (await api('PATCH', '/api/profile/prefs', patch)).user; applyPrefs(); };
 
 /** A square 256 px picture from any photo, so the account file stays small. */
 async function squareAvatar(file) {
@@ -1412,51 +1360,32 @@ async function squareAvatar(file) {
   return canvas.toDataURL('image/jpeg', 0.86);
 }
 
-function tabGuestProfile() {
-  const make = guard(async () => {
-    try { sessionStorage.setItem('uc-signup', '1'); } catch { /* the sign-in screen is shown instead */ }
-    await api('POST', '/api/auth/logout', {});
-    location.reload();
-  });
-  $('tab-profile').replaceChildren(
-    h('h2', {}, 'Guest'),
-    h('div', { class: 'who' }, h('span', { class: 'avatar big' }, 'G'), h('div', { class: 'col' }, h('b', {}, 'You are using UltraClaude as a guest'), h('span', { class: 'fine' }, 'Without an account there is no photo, no saved settings and no password to change. The guest session ends after 12 hours of not using it.'))),
-    h('div', { class: 'formrow' }, h('button', { type: 'button', class: 'btn primary', onclick: make }, 'Create an account')));
-}
-
 function tabProfile() {
-  if (S.user.guest) return tabGuestProfile();
   const u = S.user;
   const avatar = h('span', { class: 'avatar big' });
   fillAvatar(avatar, u);
   const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', hidden: true });
+  const photo = async (data) => { S.user = (await api('POST', '/api/profile', { avatar: data })).user; fillAvatar(avatar, S.user); renderProfile(); };
   file.addEventListener('change', guard(async () => {
     const f = file.files[0];
     file.value = '';
     if (!f) return;
     if (!/^image\/(png|jpeg|webp)$/.test(f.type) || f.size > 10e6) throw new Error('Choose a PNG, JPEG or WebP picture under 10 MB.');
-    S.user = (await api('PATCH', '/api/auth/profile', { avatar: await squareAvatar(f) })).user;
-    fillAvatar(avatar, S.user); renderProfile();
+    await photo(await squareAvatar(f));
   }));
-  const remove = h('button', { type: 'button', class: 'link', onclick: guard(async () => { S.user = (await api('PATCH', '/api/auth/profile', { avatar: null })).user; fillAvatar(avatar, S.user); renderProfile(); }) }, 'Remove photo');
+  const remove = h('button', { type: 'button', class: 'link', onclick: guard(() => photo(null)) }, 'Remove photo');
   const first = h('input', { value: u.firstName, maxlength: 50, autocomplete: 'given-name' });
   const last = h('input', { value: u.lastName, maxlength: 50, autocomplete: 'family-name' });
-  const email = h('input', { type: 'email', value: u.email, maxlength: 254, autocomplete: 'email', spellcheck: 'false' });
-  const pass = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200 });
-  const passField = field('Current password (needed to change your email)', pass);
-  passField.hidden = true;
-  email.addEventListener('input', () => { passField.hidden = email.value.trim().toLowerCase() === S.user.email; });
+  const birth = h('input', { type: 'date', value: u.birthDate, min: '1900-01-01', max: new Date().toISOString().slice(0, 10), autocomplete: 'bday' });
   const msg = h('span', { class: 'msg' });
   const save = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
-    const body = { firstName: first.value, lastName: last.value };
-    if (!passField.hidden) Object.assign(body, { email: email.value, password: pass.value });
-    try { S.user = (await api('PATCH', '/api/auth/profile', body)).user; renderProfile(); pass.value = ''; passField.hidden = true; fillAvatar(avatar, S.user); say(msg, 'Saved', 'ok'); } catch (err) { say(msg, err.message, 'bad'); }
+    try { S.user = (await api('POST', '/api/profile', { firstName: first.value, lastName: last.value, birthDate: birth.value })).user; renderProfile(); fillAvatar(avatar, S.user); say(msg, 'Saved', 'ok'); } catch (err) { say(msg, err.message, 'bad'); }
   } }, 'Save');
   $('tab-profile').replaceChildren(
     h('h2', {}, 'Profile'),
     h('div', { class: 'who' }, avatar, h('div', { class: 'col' }, h('button', { type: 'button', class: 'btn', onclick: () => file.click() }, 'Upload photo'), file, remove)),
-    h('div', { class: 'group' }, h('div', { class: 'row2' }, field('First name', first), field('Last name', last)), field('Email', email), passField, h('div', { class: 'formrow' }, save, msg)),
-    h('p', { class: 'fine' }, `Account created ${new Date(u.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}. Your account lives on this computer only.`));
+    h('div', { class: 'group' }, h('div', { class: 'row2' }, field('First name', first), field('Last name', last)), field('Date of birth', birth), h('div', { class: 'formrow' }, save, msg)),
+    h('p', { class: 'fine' }, 'Your profile is stored on this computer only.'));
 }
 
 function tabAppearance() {
@@ -1587,63 +1516,6 @@ async function tabUsage(fresh = false) {
   }
 }
 
-// ---- security ----
-
-const deviceName = (ua = '') => {
-  const b = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
-  const os = /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'macOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : '';
-  return os ? `${b} on ${os}` : b;
-};
-
-async function tabSecurity() {
-  const own = S.user.hasPassword !== false; // an account made with Google has none until you set one
-  const cur = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200 });
-  const next = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
-  const again = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
-  const msg = h('span', { class: 'msg' });
-  const change = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
-    if (next.value !== again.value) return say(msg, 'The two new passwords are different.', 'bad');
-    try { await api('POST', '/api/auth/password', { current: cur.value, next: next.value }); cur.value = next.value = again.value = ''; toast(own ? 'Password changed. Your other devices were signed out.' : 'Password set. You can now sign in with it too.'); S.user.hasPassword = true; tabSecurity(); } catch (err) { say(msg, err.message, 'bad'); }
-  } }, own ? 'Change password' : 'Set a password');
-
-  const guestBox = h('input', { type: 'checkbox', checked: !!S.guestAllowed });
-  guestBox.addEventListener('change', guard(async () => { S.guestAllowed = (await api('PATCH', '/api/auth/guest-setting', { allow: guestBox.checked })).guestAllowed; }));
-  const sessionsBox = h('div', { class: 'list' }, h('div', {}, 'Loading…'));
-  const others = h('button', { type: 'button', class: 'btn', hidden: true, onclick: guard(async () => { await api('POST', '/api/auth/sessions/revoke-others', {}); tabSecurity(); }) }, 'Sign out everywhere else');
-
-  const pw = h('input', own ? { type: 'password', autocomplete: 'current-password', maxlength: 200, 'aria-label': 'Your password' } : { type: 'email', autocomplete: 'off', maxlength: 254, 'aria-label': 'Your email address' });
-
-  const gmsg = h('span', { class: 'msg' });
-  const ghint = h('p', { class: 'fine', hidden: true });
-  const connectGoogle = h('button', { type: 'button', class: 'btn', onclick: async () => {
-    try { const user = await googleSignIn(ghint); if (user) { S.user = user; toast('Google is connected. You can now sign in with it.'); tabSecurity(); } } catch (err) { ghint.hidden = true; say(gmsg, err.message, 'bad'); }
-  } }, 'Connect Google');
-  const dmsg = h('span', { class: 'msg' });
-  const confirmRow = h('div', { class: 'formrow', hidden: true }, field(own ? 'Your password' : 'Type your email to confirm', pw),
-    h('button', { type: 'button', class: 'btn danger', onclick: async () => {
-      if (!confirm('Delete your account for good? Your settings and sessions are removed. Your projects and memory are not touched.')) return;
-      try { await api('DELETE', '/api/auth/account', { password: pw.value }); location.reload(); } catch (err) { say(dmsg, err.message, 'bad'); }
-    } }, 'Delete permanently'), dmsg);
-  const ask = h('button', { type: 'button', class: 'btn danger', onclick: () => { confirmRow.hidden = false; ask.hidden = true; pw.focus(); } }, 'Delete account…');
-
-  $('tab-security').replaceChildren(
-    h('h2', {}, 'Security'),
-    h('div', { class: 'group' }, h('h3', {}, 'Password'), own ? h('div', { class: 'row2' }, field('Current password', cur), h('span')) : h('p', { class: 'fine' }, 'You sign in with Google. A password is only needed to change your email, or to sign in without Google.'), h('div', { class: 'row2' }, field('New password', next), field('Repeat new password', again)), h('div', { class: 'formrow' }, change, msg), h('p', { class: 'fine' }, 'At least 10 characters. Changing it signs you out on every other device.')),
-    h('div', { class: 'group' }, h('h3', {}, 'Google'), S.user.google ? h('p', { class: 'fine' }, 'Connected. You can sign in with Continue with Google.') : h('div', { class: 'formrow' }, connectGoogle, gmsg), ghint),
-    h('div', { class: 'group' }, h('h3', {}, 'Where you are signed in'), sessionsBox, h('div', { class: 'formrow' }, others)),
-    h('div', { class: 'group' }, h('h3', {}, 'Sign-in screen'), h('label', { class: 'switch' }, guestBox, 'Offer the button Continue without signing in'), h('p', { class: 'fine' }, 'Anyone who can open this window can then use it as a guest, without an account. Turn it off to require a sign-in every time. Guests cannot see or change any account.')),
-    h('div', { class: 'group' }, h('h3', {}, 'How your account is protected'), h('p', { class: 'fine' }, 'Passwords are stored only as a salted scrypt hash. After five wrong tries an account is locked for a while. A session lasts 30 days and lives in a cookie that scripts cannot read and other websites cannot use. The window only talks to this computer.')),
-    h('div', { class: 'danger-zone group' }, h('h3', {}, 'Delete account'), h('p', { class: 'fine' }, 'Removes this account from this computer. Your projects, agents and memory stay as they are.'), ask, confirmRow));
-
-  try {
-    const { sessions } = await api('GET', '/api/auth/sessions');
-    sessionsBox.replaceChildren(...sessions.map((s) => h('div', {},
-      h('div', { class: 'grow' }, h('b', {}, deviceName(s.agent), s.current ? h('span', { class: 'chip' }, 'This device') : null), h('span', {}, `Signed in ${ago(s.createdAt)} ago · last active ${ago(s.lastSeen)} ago`)),
-      s.current ? null : h('button', { type: 'button', class: 'link', onclick: guard(async () => { await api('DELETE', `/api/auth/sessions/${s.id}`); tabSecurity(); }) }, 'Sign out'))));
-    others.hidden = sessions.length < 2;
-  } catch (err) { sessionsBox.replaceChildren(h('div', {}, err.message)); }
-}
-
 // ---------- updates from GitHub ----------
 
 async function lookForUpdate(fresh = false) {
@@ -1679,16 +1551,15 @@ function tabAbout() {
     h('h2', {}, 'About'),
     updateBox(),
     h('dl', { class: 'kv' },
-      h('dt', {}, 'Signed in as'), h('dd', {}, S.user.email), h('dt', {}, 'Version'), h('dd', { class: 'mono' }, S.version || '–'),
+      h('dt', {}, 'Version'), h('dd', { class: 'mono' }, S.version || '–'),
       h('dt', {}, 'This project'), h('dd', { class: 'mono' }, S.project.dir), h('dt', {}, 'Memory vault'), h('dd', { class: 'mono' }, S.project.vault)),
     h('div', { class: 'formrow' }, h('button', { type: 'button', class: 'btn', onclick: () => openInObsidian() }, 'Open in Obsidian'), h('button', { type: 'button', class: 'btn', onclick: guard(() => api('POST', '/api/open-vault-folder', {})) }, 'Open vault folder'), h('a', { class: 'link', href: 'https://github.com/ZH-NICO/ultraclaude', target: '_blank', rel: 'noopener noreferrer' }, 'GitHub')),
     h('div', { class: 'group' }, h('h3', {}, 'Keyboard'), h('table', { class: 'keys' }, h('tbody', {}, keys.map(([k, what]) => h('tr', {}, h('td', {}, k), h('td', {}, what)))))));
 }
 
-const TABS = { profile: tabProfile, appearance: tabAppearance, usage: tabUsage, security: tabSecurity, about: tabAbout };
+const TABS = { profile: tabProfile, appearance: tabAppearance, usage: tabUsage, about: tabAbout };
 
 function openSettings(tab = 'profile') {
-  if (S.user.guest && tab === 'security') tab = 'profile';
   const dlg = $('settingsDialog');
   if (!dlg.open) dlg.showModal();
   for (const b of $('setNav').querySelectorAll('button[data-tab]')) { b.classList.toggle('active', b.dataset.tab === tab); b.setAttribute('aria-current', String(b.dataset.tab === tab)); }
@@ -2086,53 +1957,29 @@ $('rpSlider').addEventListener('input', () => { rpPause(); RP.shown = -1; rpSeek
 $('replayRange').addEventListener('change', loadReplay);
 $('rpTools').addEventListener('change', (ev) => $('replayFeed').classList.toggle('hide-tools', !ev.target.checked));
 new ResizeObserver(() => { if (S.view === 'replay' && RP.names.length) { buildReplayGraph(); rpUpdate(RP.t, false); } }).observe($('replayStage'));
-$('authSwitch').addEventListener('click', () => showAuth(authMode === 'login' ? 'signup' : 'login'));
-$('aPass').addEventListener('input', pwHint);
-for (const id of ['aFirst', 'aLast', 'aEmail', 'aPass']) $(id).addEventListener('input', () => authError('')); // an old error is no longer true once you type
-$('aShow').addEventListener('click', () => {
-  const show = $('aPass').type === 'password';
-  $('aPass').type = show ? 'text' : 'password';
-  setText($('aShow'), show ? 'Hide' : 'Show');
-  $('aShow').setAttribute('aria-pressed', String(show));
-});
+for (const id of ['aFirst', 'aLast', 'aBirth']) $(id).addEventListener('input', () => welcomeError('')); // an old error is no longer true
 $('authForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  const body = { email: $('aEmail').value.trim(), password: $('aPass').value };
-  if (authMode === 'signup') Object.assign(body, { firstName: $('aFirst').value, lastName: $('aLast').value });
-  const missing = !body.email || !body.password || (authMode === 'signup' && (!body.firstName.trim() || !body.lastName.trim()));
-  if (missing) return authError(authMode === 'signup' ? 'Fill in your name, email and password.' : 'Enter your email and password.');
-  authError('');
+  welcomeError('');
   $('authGo').disabled = true;
   try {
-    const { user } = await api('POST', `/api/auth/${authMode}`, body);
-    $('aPass').value = '';
-    enterApp(user);
+    enterApp((await api('POST', '/api/profile', { firstName: $('aFirst').value, lastName: $('aLast').value, birthDate: $('aBirth').value })).user);
   } catch (err) {
-    authError(err.message);
-    $('aPass').focus();
+    welcomeError(err.message);
   } finally {
     $('authGo').disabled = false;
   }
-});
-$('googleGo').addEventListener('click', async () => {
-  authError('');
-  try { const user = await googleSignIn($('googleHint')); if (user && !$('auth').hidden) enterApp(user); } catch (err) { $('googleHint').hidden = true; authError(err.message); }
-});
-$('guestGo').addEventListener('click', async () => {
-  $('guestGo').disabled = true;
-  try { enterApp((await api('POST', '/api/auth/guest')).user); } catch (err) { authError(err.message); } finally { $('guestGo').disabled = false; }
 });
 $('profileBtn').addEventListener('click', () => openSettings('profile'));
 $('setNav').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-tab]'); if (b) openSettings(b.dataset.tab); });
 $('setClose').addEventListener('click', () => $('settingsDialog').close());
 $('settingsDialog').addEventListener('click', (ev) => { if (ev.target === $('settingsDialog')) $('settingsDialog').close(); }); // a click on the dimmed area
-$('signOut').addEventListener('click', guard(async () => { await api('POST', '/api/auth/logout', {}); location.reload(); }));
 $('updateBtn').addEventListener('click', guard(async () => {
   await api('POST', '/api/restart', {});
   halt('Restarting UltraClaude', 'The new version opens in a new window in a moment. You can close this one.');
 }));
 $('newBtn').addEventListener('click', runUpdate);
-setInterval(() => { if (!halted && !S.user?.guest) lookForUpdate(); }, 3600e3);
+setInterval(() => { if (!halted && S.user) lookForUpdate(); }, 3600e3);
 $('mapFilter').addEventListener('input', () => { syncBrain(); clearTimeout(S.searchTimer); S.searchTimer = setTimeout(() => { if (views) { views.table.offset = 0; views.bar(); views.refresh(); } }, 250); });
 $('mapFilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') views?.open('table'); });
 document.addEventListener('keydown', (ev) => { if (ev.key !== 'Escape' || S.view !== 'map' || !views || ev.defaultPrevented) return; if (views.drawer) views.closeDrawer(); else if (views.view !== 'brain') views.back(); });
