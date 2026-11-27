@@ -22,6 +22,7 @@ import * as git from './git.js';
 import { missionViews, startMission, stopMission } from './missions.js';
 import { FileIndex } from './fileindex.js';
 import { BrainChat } from './brainchat.js';
+import * as bq from './brainquery.js';
 import { checkUpdate, installUpdate } from './update.js';
 
 const COOKIE = 'uc_session';
@@ -126,7 +127,9 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
   costGuard.on('change', (guard) => broadcast({ t: 'guard', guard }));
   // the brain: an index of all file names on this computer, and a Claude chat that finds and sorts them
   const fileIndex = new FileIndex({ journal: path.join(path.dirname(usersFile), 'brain-moves.jsonl') });
-  const brainChat = new BrainChat({ index: fileIndex, endpoint: () => project.endpoint, dataDir: project.dataDir });
+  const brainTags = new bq.Tags(path.join(path.dirname(usersFile), 'brain-tags.json'));
+  const brainChat = new BrainChat({ index: fileIndex, endpoint: () => project.endpoint, dataDir: project.dataDir, tags: brainTags });
+  brainChat.on('view', (view) => broadcast({ t: 'brainview', view }));
   fileIndex.on('status', (status) => broadcast({ t: 'brainindex', status }));
   brainChat.on('item', (item) => broadcast({ t: 'brainchat', item }));
   brainChat.on('busy', (busy) => broadcast({ t: 'brainbusy', busy }));
@@ -254,6 +257,12 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         return send(res, 200, fileIndex.state === 'ready' ? fileIndex.payload() : fileIndex.status());
       }
       if (route === 'GET /api/brain/chat') return send(res, 200, brainChat.view());
+      if (route === 'GET /api/brain/saved') return send(res, 200, { tags: brainTags.all(), views: brainTags.data.views, types: bq.TYPES, dimensions: bq.DIMENSIONS });
+      const ask = /^\/api\/brain\/(table|pivot|timeline|storage|duplicates)$/.exec(url.pathname);
+      if (req.method === 'POST' && ask) {
+        if (fileIndex.state !== 'ready') return send(res, 409, { error: 'The files are still being read. One moment.' });
+        return send(res, 200, { ...bq[ask[1]](fileIndex, brainTags, await readBody(req)), measured: fileIndex.measured });
+      }
       if (who.user.guest) return send(res, 403, { error: 'Create an account to use this.' });
       const b = await readBody(req);
       if (route === 'POST /api/brain/rescan') { if (fileIndex.state !== 'indexing') fileIndex.build(); return send(res, 200, fileIndex.status()); }
@@ -269,6 +278,18 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         const p = plan[2] === 'discard' ? brainChat.discard(plan[1]) : await brainChat[plan[2]](plan[1]);
         if (plan[2] !== 'discard') project.event('memory', 'user', `${plan[2] === 'apply' ? 'sorted' : 'put back'} ${p.moves.length} ${p.moves.length === 1 ? 'file' : 'files'} in the brain`, { op: 'write' });
         return send(res, 200, p);
+      }
+      if (route === 'POST /api/brain/export') return send(res, 200, { csv: bq.csv(fileIndex, brainTags, b) });
+      if (route === 'POST /api/brain/plan') {
+        const moves = bq.organize(fileIndex, brainTags, b);
+        return send(res, 200, brainChat.propose(moves, b.reason || (b.by ? `Sorted by ${b.by}.` : 'Moved from the table.')));
+      }
+      if (route === 'POST /api/brain/tags') { brainTags.change((Array.isArray(b.paths) ? b.paths : []).map(String).filter((p) => fileIndex.allowed(p)), b.add, b.remove); return send(res, 200, { tags: brainTags.all() }); }
+      if (route === 'POST /api/brain/views') { if (b.remove) brainTags.removeView(String(b.remove)); else brainTags.saveView(b); return send(res, 200, { views: brainTags.data.views }); }
+      if (route === 'POST /api/brain/preview') {
+        const target = String(b.path || '');
+        if (!fileIndex.allowed(target) || !fs.existsSync(target)) return send(res, 400, { error: 'That is not a file the brain knows.' });
+        return send(res, 200, bq.preview(target));
       }
       if (route === 'POST /api/brain/open') {
         const target = String(b.path || '');

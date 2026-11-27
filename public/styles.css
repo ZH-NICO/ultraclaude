@@ -870,3 +870,80 @@ dialog.settings { width: min(1000px, 88vw); height: min(700px, 84vh); max-height
 .brain-status .spin { width: 10px; height: 10px; border: 1.5px solid rgba(255,255,255,.3); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 820px) { .brain-status { max-width: calc(100% - 32px); top: auto; bottom: 8px; } #view-map .brain-side { max-height: 60vh; } }
+/* the bar over the brain: views and the filter they share */
+.brain-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.brain-bar .seg { margin-right: 6px; }
+.brain-bar .seg button { background: #000; color: rgba(255,255,255,.65); }
+.brain-bar .seg button.on { background: #fff; color: #000; }
+#view-map select, #view-map .brain-bar input, #view-map .brain-data input:not([type=checkbox]) { height: 28px; padding: 0 8px; border: 1px solid rgba(255,255,255,.22); border-radius: 6px; background: #000; color: #fff; font: 12.5px var(--sans); }
+#view-map select:focus-visible, #view-map input:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.brain-bar .spacer { flex: 1; }
+.fchip { padding: 4px 10px; border: 1px solid rgba(255,255,255,.28); border-radius: 999px; background: none; color: #fff; font-size: 12px; cursor: pointer; }
+.fchip:hover { background: rgba(255,255,255,.1); }
+.saved { display: inline-flex; align-items: center; }
+.saved .x { border: 0; background: none; color: rgba(255,255,255,.4); cursor: pointer; font-size: 11px; }
+.saved .x:hover { color: #fff; }
+.save-form { display: flex; gap: 6px; }
+#view-map .brain-bar .link, #view-map .brain-data .link { color: rgba(255,255,255,.7); font-size: 12.5px; text-decoration: underline; }
+#view-map .brain-bar .btn, #view-map .brain-data .btn { background: #000; border-color: rgba(255,255,255,.4); color: #fff; }
+#view-map .brain-data .btn.primary { background: #fff; border-color: #fff; color: #000; }
+#view-map .brain-data .btn:disabled { opacity: .35; cursor: default; }
+.brain-data { position: absolute; inset: 0; z-index: 4; overflow: auto; padding: 16px 20px 40px; background: #000; cursor: default; user-select: text; }
+.data-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; color: rgba(255,255,255,.65); font-size: 13px; }
+.data-head b { color: #fff; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+.data-note, .data-empty { color: rgba(255,255,255,.5); font-size: 12.5px; margin: 8px 0; }
+.data-empty { padding: 48px 0; text-align: center; }
+.data-scroll { overflow-x: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; color: rgba(255,255,255,.78); }
+table.data th, table.data td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,.09); text-align: left; white-space: nowrap; }
+table.data thead th { color: rgba(255,255,255,.45); font-weight: 500; border-bottom-color: rgba(255,255,255,.28); }
+table.data button { padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; text-align: left; }
+table.data button:hover { color: #fff; text-decoration: underline; }
+table.data tbody tr { cursor: pointer; }
+table.data tbody tr:hover, table.data tr.sel { background: rgba(255,255,255,.06); }
+table.data .c-name { max-width: 300px; overflow: hidden; text-overflow: ellipsis; color: #fff; }
+table.data .c-name i { display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--tc); }
+table.data .c-size { text-align: right; font-variant-numeric: tabular-nums; }
+table.data .c-folder { max-width: 260px; overflow: hidden; text-overflow: ellipsis; direction: rtl; font: 11.5px var(--mono); color: rgba(255,255,255,.45); }
+table.data .tag { margin-right: 4px; padding: 1px 7px; border: 1px solid rgba(255,255,255,.3); border-radius: 999px; font-size: 11px; }
+table.pivot th, table.pivot td { text-align: right; font-variant-numeric: tabular-nums; }
+table.pivot th:first-child { text-align: left; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+table.pivot tbody th { color: #fff; font-weight: 500; }
+table.pivot .cell { background: rgba(77,163,255,var(--a)); color: #fff; }
+table.pivot .cell button { width: 100%; text-align: right; }
+table.pivot .sum { color: #fff; font-weight: 600; }
+.pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 14px; font-size: 12px; color: rgba(255,255,255,.55); }
+.pickbar { position: sticky; top: -16px; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.35); border-radius: 10px; background: #0d0d0d; font-size: 12.5px; }
+.pickbar .pg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pickbar .into { width: 280px; max-width: 60vw; }
+.pickbar .tagin { width: 100px; }
+.pickbar small { color: rgba(255,255,255,.45); }
+.timeline { display: flex; align-items: stretch; gap: 3px; height: 340px; overflow-x: auto; padding-bottom: 4px; }
+.tl { flex: 1 0 30px; max-width: 72px; display: grid; grid-template-rows: 16px 1fr 18px; gap: 4px; justify-items: center; align-items: end; padding: 0; border: 0; background: none; color: rgba(255,255,255,.5); cursor: pointer; }
+.tl:hover { background: rgba(255,255,255,.07); color: #fff; }
+.tl b { font-size: 10.5px; font-weight: 500; }
+.tl small { font-size: 10px; white-space: nowrap; }
+.tl-bar { display: flex; flex-direction: column-reverse; width: 70%; border-radius: 3px 3px 0 0; overflow: hidden; }
+.tl-bar i { min-height: 1px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; }
+.legend button { display: flex; align-items: center; gap: 7px; padding: 0; border: 0; background: none; color: rgba(255,255,255,.7); font-size: 12px; cursor: pointer; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; background: var(--tc); }
+.treemap { position: relative; }
+.tile { position: absolute; display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; padding: 6px 8px; overflow: hidden; border: 1px solid #000; border-radius: 4px; background: color-mix(in srgb, var(--tc) 38%, #000); color: #fff; text-align: left; cursor: pointer; }
+.tile:hover { background: color-mix(in srgb, var(--tc) 62%, #000); }
+.tile.file { background: color-mix(in srgb, var(--tc) 20%, #000); border-color: color-mix(in srgb, var(--tc) 55%, #000); }
+.tile.rest { cursor: default; }
+.tile span { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tile small { font-size: 11px; opacity: .75; }
+.dups { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; }
+.dups > li { padding: 10px 12px; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; }
+.dups p { margin: 0 0 6px; color: rgba(255,255,255,.55); font-size: 12.5px; }
+.dups p b { color: #fff; }
+.dups ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.dups ol li { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; }
+.dups button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; border: 0; background: none; color: rgba(255,255,255,.8); font: 11.5px var(--mono); cursor: pointer; text-align: left; }
+.dups small { flex: none; color: rgba(255,255,255,.4); font-size: 11px; }
+.file-look img { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); }
+.file-look pre { max-height: 280px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; font: 11px/1.5 var(--mono); color: rgba(255,255,255,.75); white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-meta:empty { display: none; }
+@media (max-width: 820px) { .brain-bar .spacer { display: none; } .brain-data { padding: 12px; } }

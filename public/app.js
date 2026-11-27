@@ -5,6 +5,7 @@ import { agentsIn, stateAt, density, nextEventAfter } from './replay.js';
 import { layout, degrees, dotSize, panZoom } from './graph.js';
 import { petSprite, petPlace, petMood } from './pet.js';
 import { BrainView } from './brain.js';
+import { BrainViews, bytes, day } from './brainviews.js';
 
 const VIEWS = ['overview', 'agents', 'tasks', 'memory', 'map', 'replay', 'changes', 'missions'];
 const STATE = { working: 'working', waiting: 'needs you', idle: 'idle', starting: 'starting', stopped: 'stopped' };
@@ -92,6 +93,21 @@ let brain = null;
 let brainFiles = null; // the index from the server, once it is built
 let brainIndex = { state: 'idle', files: 0 };
 const ask = { items: [], busy: false };
+let views = null; // table, pivot, timeline, storage and duplicates
+
+function brainViews() {
+  views ||= new BrainViews({
+    $, h, api, toast, guard,
+    query: () => $('mapFilter').value.trim(),
+    setQuery: (q) => { $('mapFilter').value = q; syncBrain(); },
+    showPaths: (paths, label) => { if (!brain) return; if (!paths) { brain.overview(); $('brainStatus').dataset.label = ''; } else brain.show(paths); syncBrainStatus(label); },
+    pickFile: (p) => { chatPick = { file: p }; setSide('details'); renderChatDetail(); },
+    askAbout,
+    planned: (plan) => { onBrainChat(plan); setSide('ask'); toast('The plan is on the right. Nothing moves until you apply it.'); },
+    brainShown: (shown) => { if (!brain) return; if (shown && S.view === 'map') { brain.start(); brain.draw(); } else brain.stop(); for (const id of ['brainLegend', 'brainStats', 'brainStatus']) $(id).style.visibility = shown ? '' : 'hidden'; },
+  });
+  return views;
+}
 
 const kb = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} kB`);
 const stamp = (ts) => new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -130,7 +146,9 @@ const loadChats = guard(async () => {
     if (newest) chatPick = { key: newest.pr.key, id: newest.s.id };
   }
   syncBrain();
-  if (S.view === 'map') brain.start();
+  brainViews().home = brainIndex.home;
+  await views.loadSaved();
+  if (S.view === 'map' && views.view === 'brain') brain.start(); else views.refresh();
 });
 
 /** The index changed (built, rebuilt or files moved): draw it anew. */
@@ -138,7 +156,7 @@ const reloadFiles = guard(async () => {
   const files = await api('GET', '/api/brain');
   brainIndex = files;
   brainFiles = files.files ? files : null;
-  if (brain && chatData) { brain.setData(chatData, brainFiles); syncBrain(); }
+  if (brain && chatData) { brain.setData(chatData, brainFiles); syncBrain(); if (views && (views.view !== 'brain' || views.filtering)) views.refresh(); }
 });
 
 function syncBrain() {
@@ -164,6 +182,10 @@ function syncBrain() {
     h('p', {}, h('b', {}, String(brain.model.regions.length)), ` ${brain.model.regions.length === 1 ? 'region' : 'regions'}`),
   ].filter(Boolean));
   syncBrainStatus();
+  if (views) {
+    views.regions = Object.fromEntries(brain.model.regions.filter((r) => r.path).map((r) => [r.name, r.path]));
+    $('brainFolders').replaceChildren(...brain.model.regions.filter((r) => r.path).map((r) => h('option', { value: r.path })));
+  }
   if (!brain.running) brain.draw();
   renderChatDetail();
 }
@@ -220,13 +242,27 @@ function renderChatDetail() {
 
 function renderFileDetail(p) {
   const reg = brain?.model?.regions.find((r) => r.path && (samePath(dirName(p), r.path) || p.toLowerCase().startsWith(`${r.path.toLowerCase()}${p.includes('\\') ? '\\' : '/'}`)));
+  const meta = h('dl', { class: 'file-meta' });
+  const look = h('div', { class: 'file-look' });
+  showPreview(p, meta, look);
   $('mapDetail').replaceChildren(
     h('p', { class: 'kicker', style: `--rc:${reg?.color || '#fff'}` }, h('i'), `File${reg ? ` · ${reg.name}` : ''}`),
     h('h2', {}, fileBase(p)),
     h('dl', {}, h('dt', {}, 'Folder'), h('dd', { class: 'mono' }, dirName(p))),
+    meta,
     h('div', { class: 'row-btns' },
       h('button', { type: 'button', class: 'btn primary', onclick: guard(() => api('POST', '/api/brain/open', { path: p })) }, 'Show in folder'),
-      h('button', { type: 'button', class: 'btn', onclick: () => askAbout(`What is "${p}" and where does it belong?`) }, 'Ask about it')));
+      h('button', { type: 'button', class: 'btn', onclick: () => askAbout(`What is "${p}" and where does it belong?`) }, 'Ask about it')),
+    look);
+}
+
+async function showPreview(p, meta, look) {
+  try {
+    const v = await api('POST', '/api/brain/preview', { path: p });
+    meta.replaceChildren(h('dt', {}, 'Size'), h('dd', {}, bytes(v.size)), h('dt', {}, 'Modified'), h('dd', {}, day(v.mtime)));
+    if (v.kind === 'image') look.replaceChildren(h('img', { src: v.data, alt: fileBase(p) }));
+    else if (v.kind === 'text') look.replaceChildren(h('pre', {}, v.text, v.cut ? '\n…' : ''));
+  } catch { /* guests and files that are gone have no preview */ }
 }
 
 function openFolderButton(dir, name) {
@@ -251,7 +287,7 @@ function renderRegionDetail(r) {
 
 // ---------- the brain chat ----------
 
-const SUGGESTIONS = ['Where are my tax documents?', 'What is taking up my Downloads folder?', 'Sort my Downloads folder', 'Find the photos from my phone'];
+const SUGGESTIONS = ['Where are my tax documents?', 'What takes the most space on my computer?', 'Make a table of file types by year', 'Open the timeline for this year', 'Sort my Downloads folder by type', 'Find duplicate files'];
 
 /** Plain text with `code` and line breaks, safely as DOM nodes. */
 function richText(text) {
@@ -277,7 +313,7 @@ function planCard(it) {
 function askItem(it) {
   if (it.kind === 'user') return h('div', { class: 'msg user' }, ...richText(it.text));
   if (it.kind === 'text') return h('div', { class: 'msg bot' }, ...richText(it.text));
-  if (it.kind === 'action') return h('button', { type: 'button', class: 'chip', title: 'Show these in the brain', onclick: () => { if (brain?.show(it.paths)) syncBrainStatus(it.text); } }, h('i'), it.text);
+  if (it.kind === 'action') return h('button', { type: 'button', class: 'chip', title: it.view ? 'Open this view' : 'Show these in the brain', onclick: () => { if (it.view) return brainViews().open(it.view.view, it.view); brainViews().open('brain', { filter: {} }); if (brain?.show(it.paths)) syncBrainStatus(it.text); } }, h('i'), it.text);
   if (it.kind === 'tool') return h('p', { class: 'tool' }, it.text);
   if (it.kind === 'error') return h('p', { class: 'msg error' }, it.text);
   if (it.kind === 'plan') return planCard(it);
@@ -1219,11 +1255,12 @@ function connect() {
     else if (m.t === 'sessions') { S.sessions = m.sessions; renderSessions(); }
     else if (m.t === 'guard') renderGuard(m.guard);
     else if (m.t === 'missions') renderMissions(m.missions);
-    else if (m.t === 'brainindex') { const was = brainIndex.state; brainIndex = { ...brainIndex, ...m.status, total: m.status.files }; if (m.status.state === 'ready' && (was !== 'ready' || !brainFiles)) reloadFiles(); else syncBrainStatus(); }
+    else if (m.t === 'brainindex') { if (m.status.measured && !brainIndex.measured && views && views.view !== 'brain' && S.view === 'map') setTimeout(() => views.refresh(), 0); const was = brainIndex.state; brainIndex = { ...brainIndex, ...m.status, total: m.status.files }; if (m.status.state === 'ready' && (was !== 'ready' || !brainFiles)) reloadFiles(); else syncBrainStatus(); }
     else if (m.t === 'brainchat') onBrainChat(m.item);
     else if (m.t === 'brainbusy') { ask.busy = m.busy; renderAsk(); }
     else if (m.t === 'brainreset') { ask.items = []; renderAsk(); }
-    else if (m.t === 'brainshow') { if (brain && S.view === 'map' && brain.show(m.paths)) syncBrainStatus(m.label); }
+    else if (m.t === 'brainshow') { if (brain && S.view === 'map' && (!views || views.view === 'brain') && brain.show(m.paths)) syncBrainStatus(m.label); }
+    else if (m.t === 'brainview') { if (S.view === 'map') brainViews().open(m.view.view, m.view); }
     else if (m.t === 'notes') { S.noteCount = m.count; syncSide(); syncGraph(); if (S.view === 'memory') { loadNotes(); scheduleGraph(); } } // keeps an open editor as it is
   };
   ws.onclose = (ev) => {
@@ -2052,7 +2089,9 @@ $('updateBtn').addEventListener('click', guard(async () => {
 }));
 $('newBtn').addEventListener('click', runUpdate);
 setInterval(() => { if (!halted && !S.user?.guest) lookForUpdate(); }, 3600e3);
-$('mapFilter').addEventListener('input', () => syncBrain());
+$('mapFilter').addEventListener('input', () => { syncBrain(); clearTimeout(S.searchTimer); S.searchTimer = setTimeout(() => { if (views) { views.table.offset = 0; views.bar(); views.refresh(); } }, 250); });
+$('mapFilter').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && views?.view === 'brain') views.open('table'); });
+document.addEventListener('keydown', (ev) => { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k' && S.view === 'map') { ev.preventDefault(); $('mapFilter').focus(); $('mapFilter').select(); } });
 $('sideTabs').addEventListener('click', (ev) => { const b = ev.target.closest('button[data-side]'); if (b) setSide(b.dataset.side); });
 $('askForm').addEventListener('submit', (ev) => { ev.preventDefault(); sendAsk(); });
 $('askInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); sendAsk(); } });

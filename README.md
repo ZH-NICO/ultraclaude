@@ -109,7 +109,20 @@ In the Overview every agent is an animated pixel pet, so you see its state from 
 
 Click **ultraclaude** at the top left to open your **brain**: every file on this computer as a point of light in a slowly turning 3D brain, with its cerebrum, cerebellum and stem, and every Claude Code chat as a brighter neuron among the files of its folder. The first time it opens, UltraClaude reads the **names** of your files in the background (never their contents; the system, installed programs, app data, hidden folders and `node_modules` are left out; up to 400,000 files, of which up to 40,000 are drawn). Each main folder (Documents, Downloads, your code, …) is a region with its own stretch of the spectrum, listed on the left with its count. The brain builds itself from the stem upwards, today's chats pulse, and now and then a few neurons of a region fire together. Drag to turn it, scroll to zoom, double-click for everything. Hover a point to see the file or chat; click it to open its folder, continue the chat, or ask about it.
 
-**Ask your brain.** Next to it is a Claude chat that knows the names of all your files. Ask where something is ("where are my tax documents?"), what a folder holds, or let it sort a folder. It runs through your own Claude Code login. It can search the index, list folders, read a file when its content matters, and fly the brain to what it talks about, so you see it light up. It cannot run commands, write or delete. To sort, it proposes a plan of moves; nothing moves until you press **Apply**, nothing is ever overwritten, and **Undo** puts everything back.
+**Six views, one filter.** The bar above the brain switches between them, and the type, period, size, tag, folder and search box apply to all of them (*Ctrl+K* jumps to the search):
+
+| View | What it shows |
+|---|---|
+| **Brain** | the 3D brain; with a filter set, the matching files light up |
+| **Table** | every matching file with type, size, date, folder and tags; sort by any column, select files, export CSV |
+| **Pivot** | any two things against each other (type, extension, main folder, folder, year, month, size, tag), counting files or adding up their size; click a cell to see exactly those files |
+| **Timeline** | files per month, coloured by type; click a month to set it as the period everywhere |
+| **Storage** | a treemap of where your disk space goes; click to go into a folder |
+| **Duplicates** | files with the same name and size, biggest waste first |
+
+**Sort without asking anyone.** Select files in the table (or take all that match, up to 500), name a target folder and optionally sort into subfolders by type, extension, year or month. Duplicates can set the extra copies aside the same way. You get the same plan as from Claude: check it, **Apply**, **Undo**. Nothing is ever deleted. Tag files, and save a view with its filters to open it again with one click. Click a file to see its size, date and a preview of text and pictures.
+
+**Ask your brain.** Next to it is a Claude chat that knows the names of all your files. Ask where something is ("where are my tax documents?"), what a folder holds, or let it sort a folder. It runs through your own Claude Code login. It can search and filter the index, make pivots, find duplicates, open any view for you, tag files, read a file when its content matters, and fly the brain to what it talks about, so you see it light up. It cannot run commands, write or delete. To sort, it proposes a plan of moves; nothing moves until you press **Apply**, nothing is ever overwritten, and **Undo** puts everything back.
 
 Inspired by the look of [mindcorpus.org](https://mindcorpus.org/); drawn by UltraClaude itself, without any of its code or assets. It holds still when your system asks for reduced motion.
 

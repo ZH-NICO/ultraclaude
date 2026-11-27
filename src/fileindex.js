@@ -39,9 +39,10 @@ export class FileIndex extends EventEmitter {
     this.files = []; // [dirIndex, name]
     this.byPath = null;
     this.startedAt = 0; this.took = 0; this.truncated = false; this.skipped = 0;
+    this.measured = false;
   }
 
-  status() { return { state: this.state, files: this.files.length, dirs: this.dirs.length, roots: this.roots, took: this.took, truncated: this.truncated }; }
+  status() { return { state: this.state, measured: this.measured, files: this.files.length, dirs: this.dirs.length, roots: this.roots, took: this.took, truncated: this.truncated, home: this.home }; }
 
   /** Whether a folder is left out of the index. */
   skips(dir, name) {
@@ -83,8 +84,22 @@ export class FileIndex extends EventEmitter {
       this.walk = null;
       this.emit('status', this.status());
       this.emit('ready');
+      this.measuring = this.measure();
     })();
     return this.walk;
+  }
+
+  /** Size and date of every file (still no contents), in batches so the app stays quick. */
+  async measure() {
+    const list = this.files;
+    for (let i = 0; i < list.length && this.files === list; i += 200) {
+      await Promise.all(list.slice(i, i + 200).map(async (f) => {
+        try { const st = await fs.promises.stat(path.join(this.dirs[f[0]], f[1])); f[2] = st.size; f[3] = Math.round(st.mtimeMs); } catch { /* gone or locked */ }
+      }));
+    }
+    if (this.files !== list) return; // a new walk started meanwhile
+    this.measured = true;
+    this.emit('status', this.status());
   }
 
   pathOf(i) { const [d, n] = this.files[i]; return path.join(this.dirs[d], n); }
@@ -230,6 +245,6 @@ export class FileIndex extends EventEmitter {
     const i = this.files.findIndex(([fd, n]) => fd === d && n === name);
     let td = this.dirs.findIndex((x) => norm(x) === norm(path.dirname(to)));
     if (td < 0) { td = this.dirs.push(path.dirname(to)) - 1; this.dirParent.push(this.dirs.findIndex((x) => norm(x) === norm(path.dirname(path.dirname(to))))); }
-    if (i >= 0) this.files[i] = [td, path.basename(to)];
+    if (i >= 0) this.files[i] = [td, path.basename(to), this.files[i][2], this.files[i][3]];
   }
 }

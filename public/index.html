@@ -209,8 +209,10 @@
       <header class="view-head">
         <h1>Brain</h1>
         <p class="sub" id="mapSummary"></p>
-        <input id="mapFilter" class="head-filter" placeholder="Search your brain" autocomplete="off" aria-label="Search your brain">
+        <input id="mapFilter" class="head-filter" placeholder="Search your brain  (Ctrl+K)" autocomplete="off" aria-label="Search your brain">
       </header>
+      <div class="brain-bar" id="brainBar"></div>
+      <datalist id="brainFolders"></datalist>
       <div class="chatmap brain">
         <div class="map-stage brain-stage" id="mapStage">
           <canvas id="brainCanvas" role="img" aria-label="Every file and Claude Code chat on this computer as a point of light in a turning brain, one coloured region per main folder"></canvas>
@@ -219,6 +221,7 @@
           <div class="brain-stats" id="brainStats"></div>
           <p class="map-hint">Drag to turn · scroll to zoom · double-click for everything · click a point to see that file or chat</p>
           <p class="map-empty" id="mapEmpty" hidden></p>
+          <div class="brain-data" id="brainData" hidden></div>
         </div>
         <aside class="map-detail brain-side">
           <div class="side-tabs" id="sideTabs" role="tablist">

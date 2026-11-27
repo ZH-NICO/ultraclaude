@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveClaude, claudeEnv } from './project.js';
+import * as bq from './brainquery.js';
 
 const GUIDE = `[UltraClaude brain] You are the guide to the person's brain in UltraClaude: an index of the names of all files on this computer (system, program and hidden folders are left out). Help them find, understand and sort their files.
 - brain_overview: the regions (main folders) and how many files each holds.
@@ -15,6 +16,12 @@ const GUIDE = `[UltraClaude brain] You are the guide to the person's brain in Ul
 - brain_list: what is directly inside a folder.
 - brain_show: makes the brain view fly to files and light them up. Call it for the files you talk about, so the person sees them.
 - brain_propose_moves: to sort, propose moves (from, to; full paths). Nothing moves until the person applies the plan in the window; they can undo it. Never overwrite, never delete, keep file names unless asked.
+- brain_query: filtered, sorted file lists with size and date (type, folder, period, size, tag).
+- brain_pivot: a table of any two things (type, ext, region, folder, year, month, size, tag), counting files or size.
+- brain_duplicates: files with the same name and size.
+- brain_view: open a view (brain, table, pivot, timeline, storage, duplicates) with a filter, so the person sees it. Use it whenever a view answers the question; the period and filter apply to every view.
+- brain_organize: propose a plan that moves matching files into a folder, optionally into subfolders by type, ext, year or month.
+- brain_tag: add or remove tags on files.
 - Read: open a file when its content matters for sorting.
 Answer briefly, in the person's language.`;
 
@@ -26,11 +33,29 @@ const TOOLS = [
   { name: 'brain_propose_moves', description: 'Propose moving files or folders to sort them. The person sees the plan and applies or discards it; nothing moves before. Full paths; the target must not exist.', inputSchema: { type: 'object', properties: { moves: { type: 'array', items: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } }, reason: { type: 'string', description: 'One sentence: why these moves' } }, required: ['moves'] } },
 ];
 
+const FILTER = { type: 'object', description: 'All optional', properties: {
+  q: { type: 'string', description: 'words that must be in the path; ".pdf" keeps one extension' },
+  type: { type: 'string', enum: bq.TYPES }, folder: { type: 'string', description: 'full path; includes subfolders' },
+  from: { type: 'string', description: 'date YYYY-MM-DD, modified on or after' }, to: { type: 'string', description: 'date YYYY-MM-DD, modified before' },
+  min: { type: 'number', description: 'bytes' }, max: { type: 'number', description: 'bytes' }, tag: { type: 'string' } } };
+TOOLS.push(
+  { name: 'brain_query', description: 'Files that match a filter, sorted. Gives size, date, type and tags.', inputSchema: { type: 'object', properties: { filter: FILTER, sort: { type: 'string', enum: ['mtime', 'size', 'name', 'type', 'folder'] }, desc: { type: 'boolean' }, limit: { type: 'number' } } } },
+  { name: 'brain_pivot', description: 'A table of two dimensions over the matching files.', inputSchema: { type: 'object', properties: { filter: FILTER, rows: { type: 'string', enum: bq.DIMENSIONS }, cols: { type: 'string', enum: bq.DIMENSIONS }, value: { type: 'string', enum: ['count', 'size'] } } } },
+  { name: 'brain_duplicates', description: 'Files that appear more than once with the same name and size.', inputSchema: { type: 'object', properties: { filter: FILTER } } },
+  { name: 'brain_view', description: 'Open a view of the brain for the person, with a filter.', inputSchema: { type: 'object', properties: { view: { type: 'string', enum: ['brain', 'table', 'pivot', 'timeline', 'storage', 'duplicates'] }, filter: FILTER, rows: { type: 'string', enum: bq.DIMENSIONS }, cols: { type: 'string', enum: bq.DIMENSIONS }, value: { type: 'string', enum: ['count', 'size'] }, sort: { type: 'string' } }, required: ['view'] } },
+  { name: 'brain_organize', description: 'Propose moving the matching files (or the given paths) into a folder, optionally into subfolders by type, ext, year or month. The person applies or discards the plan.', inputSchema: { type: 'object', properties: { filter: FILTER, paths: { type: 'array', items: { type: 'string' } }, into: { type: 'string', description: 'full path of the target folder' }, by: { type: 'string', enum: ['type', 'ext', 'year', 'month'] }, reason: { type: 'string' } } } },
+  { name: 'brain_tag', description: 'Add or remove tags on files.', inputSchema: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' } }, add: { type: 'array', items: { type: 'string' } }, remove: { type: 'array', items: { type: 'string' } } }, required: ['paths'] } },
+);
+
+/** Claude writes dates as text; the index compares numbers. */
+const dated = (f = {}) => ({ ...f, from: f.from ? Date.parse(f.from) || 0 : 0, to: f.to ? Date.parse(f.to) || 0 : 0 });
+
 const short = (s, n = 90) => (String(s).length > n ? `${String(s).slice(0, n - 1)}…` : String(s));
 
 export class BrainChat extends EventEmitter {
-  constructor({ index, endpoint, dataDir }) {
+  constructor({ index, endpoint, dataDir, tags }) {
     super();
+    this.tags = tags || new bq.Tags(path.join(dataDir, 'brain', 'tags.json'));
     this.index = index;
     this.endpoint = endpoint; // () => { port, token }
     this.dir = path.join(dataDir, 'brain');
@@ -168,6 +193,39 @@ export class BrainChat extends EventEmitter {
         this.emit('show', { paths: moves.map((m) => m.from), label: 'to sort' });
         return `Proposed ${moves.length} ${moves.length === 1 ? 'move' : 'moves'} (plan ${plan.id.slice(0, 8)}). The person decides in the window; nothing has moved yet.`;
       }
+      case 'brain_query': {
+        const r = bq.table(ix, this.tags, { ...args, filter: dated(args.filter), limit: Math.min(200, Number(args.limit) || 40) });
+        this.#add({ kind: 'action', text: `looked through ${r.total} ${r.total === 1 ? 'file' : 'files'}`, paths: r.rows.map((x) => x.path) });
+        return [`${r.total} files, ${r.bytes} bytes${ix.measured ? '' : ' (sizes and dates are still being read)'}`, ...r.rows.map((x) => `${x.path} | ${x.size ?? '?'} B | ${x.mtime ? new Date(x.mtime).toISOString().slice(0, 10) : '?'}${x.tags.length ? ` | tags: ${x.tags.join(', ')}` : ''}`)].join('\n');
+      }
+      case 'brain_pivot': {
+        const r = bq.pivot(ix, this.tags, { ...args, filter: dated(args.filter) });
+        this.#add({ kind: 'action', text: `made a table: ${r.by.rows} by ${r.by.cols}`, paths: [], view: { view: 'pivot', filter: dated(args.filter), rows: r.by.rows, cols: r.by.cols, value: r.by.value } });
+        return [`${r.by.rows} \\ ${r.by.cols} (${r.by.value})`, ['', ...r.cols.map((c) => c.name)].join(' | '), ...r.rows.map((a, i) => [a.name, ...r.cells[i]].join(' | '))].join('\n');
+      }
+      case 'brain_duplicates': {
+        const r = bq.duplicates(ix, this.tags, { filter: dated(args.filter) });
+        this.#add({ kind: 'action', text: `found ${r.total} sets of duplicates`, paths: [], view: { view: 'duplicates', filter: dated(args.filter) } });
+        return [`${r.total} sets, ${r.waste} bytes could be freed`, ...r.groups.slice(0, 25).map((g) => `${g.name} (${g.size} B) ×${g.files.length}: ${g.files.map((f) => f.dir).join(' ; ')}`)].join('\n');
+      }
+      case 'brain_view': {
+        const view = { view: String(args.view), filter: dated(args.filter), rows: args.rows, cols: args.cols, value: args.value, sort: args.sort };
+        this.#add({ kind: 'action', text: `opened the ${view.view} view`, paths: [], view });
+        this.emit('view', view);
+        return `The person now sees the ${view.view} view.`;
+      }
+      case 'brain_organize': {
+        let moves;
+        try { moves = bq.organize(ix, this.tags, { ...args, filter: dated(args.filter) }); } catch (err) { return err.message; }
+        return this.call('brain_propose_moves', { moves, reason: args.reason });
+      }
+      case 'brain_tag': {
+        const paths = (Array.isArray(args.paths) ? args.paths : []).map(String).filter((p) => ix.allowed(p));
+        if (!paths.length) return 'No files to tag.';
+        this.tags.change(paths, args.add, args.remove);
+        this.#add({ kind: 'action', text: `tagged ${paths.length} ${paths.length === 1 ? 'file' : 'files'}`, paths });
+        return 'Tags saved.';
+      }
       default: throw new Error(`Unknown tool: ${name}`);
     }
   }
@@ -192,12 +250,20 @@ export class BrainChat extends EventEmitter {
 
   // ---------- plans ----------
 
+  /** A plan made by the person in the window (table, duplicates), applied the same way as Claude's. */
+  propose(moves, reason = '') {
+    const problems = this.index.check(moves);
+    if (problems.length) throw new Error(problems.slice(0, 5).join('\n'));
+    return this.#add({ kind: 'plan', state: 'pending', reason: short(reason, 300), moves });
+  }
+
   #plan(id) { const p = this.items.find((i) => i.kind === 'plan' && i.id === id); if (!p) throw new Error('There is no such plan.'); return p; }
 
   async apply(id) {
     const p = this.#plan(id);
     if (p.state !== 'pending') throw new Error(`This plan was already ${p.state}.`);
     const r = await this.index.apply(p.moves);
+    this.tags.move(r.done);
     Object.assign(p, { state: 'applied', done: r.done, failed: r.failed });
     this.#update(p);
     this.notes.push(`[UltraClaude] The person applied plan ${id.slice(0, 8)}: ${r.done.length} moved${r.failed.length ? `, ${r.failed.length} failed (${r.failed.map((f) => `${f.from}: ${f.error}`).slice(0, 5).join('; ')})` : ''}.`);
@@ -217,6 +283,7 @@ export class BrainChat extends EventEmitter {
     const p = this.#plan(id);
     if (p.state !== 'applied') throw new Error('Only an applied plan can be undone.');
     const r = await this.index.undo(p.done);
+    this.tags.move(r.done);
     Object.assign(p, { state: 'undone', undoFailed: r.failed });
     this.#update(p);
     this.notes.push(`[UltraClaude] The person undid plan ${id.slice(0, 8)}; the files are back where they were.`);
