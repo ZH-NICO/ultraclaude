@@ -30,6 +30,9 @@ export function validName(label, value) {
   return v;
 }
 
+/** A name from Google, trimmed to what an account may hold. */
+const looseName = (value, fallback) => clean(value).replace(/[\u0000-\u001f<>]/g, '').slice(0, 50) || fallback;
+
 export function validEmail(value) {
   const v = clean(value).toLowerCase();
   if (v.length > 254 || !/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>".]{2,}$/.test(v)) throw new AuthError('Enter a valid email address.');
@@ -111,7 +114,7 @@ export class Accounts {
   count() { return this.data.users.length; }
 
   publicUser(u) {
-    return { id: u.id, guest: !!u.guest, firstName: u.firstName, lastName: u.lastName, email: u.email, avatar: u.avatar || '', createdAt: u.createdAt, prefs: u.prefs };
+    return { id: u.id, guest: !!u.guest, google: !!u.google, hasPassword: !!u.pass, firstName: u.firstName, lastName: u.lastName, email: u.email, avatar: u.avatar || '', createdAt: u.createdAt, prefs: u.prefs };
   }
 
   /** Whether the sign-in screen offers "Continue without signing in". Saved with the accounts. */
@@ -160,8 +163,8 @@ export class Accounts {
     this.brake(e);
     const user = this.data.users.find((u) => u.email === e);
     this.dummy ||= await hash('not-a-real-password', Buffer.alloc(16, 1)); // equal work whether or not the account exists
-    const ok = await verify(String(password ?? '').slice(0, 200), user ? user.pass : this.dummy);
-    if (!user || !ok) {
+    const ok = await verify(String(password ?? '').slice(0, 200), user?.pass || this.dummy); // an account made with Google has no password
+    if (!user?.pass || !ok) {
       const f = this.fails.get(e) || { count: 0, until: 0 };
       f.count++;
       if (f.count >= LOCK_AFTER) f.until = Date.now() + Math.min(15 * 60_000, 30_000 * 2 ** (f.count - LOCK_AFTER));
@@ -170,6 +173,30 @@ export class Accounts {
     }
     this.fails.delete(e);
     return { user, ...this.#open(user, meta) };
+  }
+
+  /**
+   * The account behind a Google identity: the one already connected, the signed-in one that asked to be
+   * connected (`linkId`), or a new one. An existing password account is never joined just because the
+   * email is the same: whoever made it would get into it, or hand theirs to someone else.
+   */
+  google({ sub, email, firstName, lastName }, linkId = null) {
+    const e = validEmail(email);
+    const known = this.data.users.find((u) => u.google === sub);
+    if (linkId) {
+      const user = this.data.users.find((u) => u.id === linkId);
+      if (!user) throw new AuthError('That account does not exist any more.', 404);
+      if (known && known !== user) throw new AuthError('This Google account is already connected to another account here.', 409);
+      user.google = sub;
+      this.#save();
+      return user;
+    }
+    if (known) return known;
+    if (this.data.users.some((u) => u.email === e)) throw new AuthError('There is already an account with this email. Sign in with your password, then choose Connect Google under Settings → Security.', 409);
+    const user = { id: crypto.randomUUID(), firstName: looseName(firstName, e.split('@')[0]), lastName: looseName(lastName, ''), email: e, avatar: '', google: sub, createdAt: Date.now(), prefs: { theme: 'system', termFont: 13, notify: true, blockLimit: null } };
+    this.data.users.push(user);
+    this.#save();
+    return user;
   }
 
   /** Opens a session for a user who just proved who they are (sign-up, or a password check done elsewhere). */
@@ -224,13 +251,14 @@ export class Accounts {
   revokeOthers(user, keep) { this.data.sessions = this.data.sessions.filter((s) => s.userId !== user.id || s === keep); this.#save(); }
 
   async #needPassword(user, password) {
+    if (!user.pass) throw new AuthError('Set a password first, under Settings → Security.', 403);
     if (!(await verify(String(password ?? '').slice(0, 200), user.pass))) throw new AuthError('The current password is wrong.', 403);
   }
 
   async updateProfile(user, { firstName, lastName, avatar, email, password }) {
     const next = {};
     if (firstName !== undefined) next.firstName = validName('first name', firstName);
-    if (lastName !== undefined) next.lastName = validName('last name', lastName);
+    if (lastName !== undefined) next.lastName = user.google && !clean(lastName) ? '' : validName('last name', lastName); // some Google accounts have one name
     if (avatar !== undefined) next.avatar = validAvatar(avatar);
     if (email !== undefined && clean(email).toLowerCase() !== user.email) {
       const e = validEmail(email);
@@ -245,7 +273,7 @@ export class Accounts {
 
   /** Changes the password and signs out every other device. */
   async changePassword(user, current, next, keep) {
-    await this.#needPassword(user, current);
+    if (user.pass) await this.#needPassword(user, current); // a Google account sets its first password with its session
     validPassword(next, user.email);
     user.pass = await hash(next);
     this.revokeOthers(user, keep);
@@ -267,7 +295,9 @@ export class Accounts {
   }
 
   async deleteAccount(user, password) {
-    await this.#needPassword(user, password);
+    // without a password, typing the account's email is the confirmation
+    if (user.pass) await this.#needPassword(user, password);
+    else if (clean(password).toLowerCase() !== user.email) throw new AuthError('Type your email address to confirm.', 403);
     this.data.users = this.data.users.filter((u) => u !== user);
     this.data.sessions = this.data.sessions.filter((s) => s.userId !== user.id);
     this.#save();

@@ -1343,12 +1343,32 @@ function applyPrefs() {
 }
 
 function enterApp(user) {
+  googleRun++; // a Google sign-in still waiting is not needed any more
   S.user = user;
   applyPrefs();
   renderProfile();
   $('auth').hidden = true;
   document.body.classList.remove('locked');
   connect();
+}
+
+/**
+ * Opens Google in the browser and waits until the server has the answer. `hint` is where to say what is
+ * going on; resolves with the user. Starting again gives up the earlier attempt.
+ */
+let googleRun = 0;
+async function googleSignIn(hint) {
+  const run = ++googleRun;
+  const { url, handle } = await api('POST', '/api/auth/google/start', {});
+  hint.hidden = false;
+  hint.replaceChildren('Finish signing in with Google in the browser window. Nothing opened? ', h('a', { class: 'link', href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Open Google sign-in'));
+  window.open(url, '_blank', 'noopener');
+  while (run === googleRun) {
+    await new Promise((r) => setTimeout(r, 1200));
+    const r = await api('POST', '/api/auth/google/finish', { handle });
+    if (!r.pending) { hint.hidden = true; return r.user; }
+  }
+  return null;
 }
 
 /** Set by the Create an account button of the guest view, so the next page load opens the sign-up form. */
@@ -1576,23 +1596,30 @@ const deviceName = (ua = '') => {
 };
 
 async function tabSecurity() {
+  const own = S.user.hasPassword !== false; // an account made with Google has none until you set one
   const cur = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200 });
   const next = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
   const again = h('input', { type: 'password', autocomplete: 'new-password', maxlength: 200 });
   const msg = h('span', { class: 'msg' });
   const change = h('button', { type: 'button', class: 'btn primary', onclick: async () => {
     if (next.value !== again.value) return say(msg, 'The two new passwords are different.', 'bad');
-    try { await api('POST', '/api/auth/password', { current: cur.value, next: next.value }); cur.value = next.value = again.value = ''; toast('Password changed. Your other devices were signed out.'); tabSecurity(); } catch (err) { say(msg, err.message, 'bad'); }
-  } }, 'Change password');
+    try { await api('POST', '/api/auth/password', { current: cur.value, next: next.value }); cur.value = next.value = again.value = ''; toast(own ? 'Password changed. Your other devices were signed out.' : 'Password set. You can now sign in with it too.'); S.user.hasPassword = true; tabSecurity(); } catch (err) { say(msg, err.message, 'bad'); }
+  } }, own ? 'Change password' : 'Set a password');
 
   const guestBox = h('input', { type: 'checkbox', checked: !!S.guestAllowed });
   guestBox.addEventListener('change', guard(async () => { S.guestAllowed = (await api('PATCH', '/api/auth/guest-setting', { allow: guestBox.checked })).guestAllowed; }));
   const sessionsBox = h('div', { class: 'list' }, h('div', {}, 'Loading…'));
   const others = h('button', { type: 'button', class: 'btn', hidden: true, onclick: guard(async () => { await api('POST', '/api/auth/sessions/revoke-others', {}); tabSecurity(); }) }, 'Sign out everywhere else');
 
-  const pw = h('input', { type: 'password', autocomplete: 'current-password', maxlength: 200, 'aria-label': 'Your password' });
+  const pw = h('input', own ? { type: 'password', autocomplete: 'current-password', maxlength: 200, 'aria-label': 'Your password' } : { type: 'email', autocomplete: 'off', maxlength: 254, 'aria-label': 'Your email address' });
+
+  const gmsg = h('span', { class: 'msg' });
+  const ghint = h('p', { class: 'fine', hidden: true });
+  const connectGoogle = h('button', { type: 'button', class: 'btn', onclick: async () => {
+    try { const user = await googleSignIn(ghint); if (user) { S.user = user; toast('Google is connected. You can now sign in with it.'); tabSecurity(); } } catch (err) { ghint.hidden = true; say(gmsg, err.message, 'bad'); }
+  } }, 'Connect Google');
   const dmsg = h('span', { class: 'msg' });
-  const confirmRow = h('div', { class: 'formrow', hidden: true }, field('Your password', pw),
+  const confirmRow = h('div', { class: 'formrow', hidden: true }, field(own ? 'Your password' : 'Type your email to confirm', pw),
     h('button', { type: 'button', class: 'btn danger', onclick: async () => {
       if (!confirm('Delete your account for good? Your settings and sessions are removed. Your projects and memory are not touched.')) return;
       try { await api('DELETE', '/api/auth/account', { password: pw.value }); location.reload(); } catch (err) { say(dmsg, err.message, 'bad'); }
@@ -1601,7 +1628,8 @@ async function tabSecurity() {
 
   $('tab-security').replaceChildren(
     h('h2', {}, 'Security'),
-    h('div', { class: 'group' }, h('h3', {}, 'Password'), h('div', { class: 'row2' }, field('Current password', cur), h('span')), h('div', { class: 'row2' }, field('New password', next), field('Repeat new password', again)), h('div', { class: 'formrow' }, change, msg), h('p', { class: 'fine' }, 'At least 10 characters. Changing it signs you out on every other device.')),
+    h('div', { class: 'group' }, h('h3', {}, 'Password'), own ? h('div', { class: 'row2' }, field('Current password', cur), h('span')) : h('p', { class: 'fine' }, 'You sign in with Google. A password is only needed to change your email, or to sign in without Google.'), h('div', { class: 'row2' }, field('New password', next), field('Repeat new password', again)), h('div', { class: 'formrow' }, change, msg), h('p', { class: 'fine' }, 'At least 10 characters. Changing it signs you out on every other device.')),
+    h('div', { class: 'group' }, h('h3', {}, 'Google'), S.user.google ? h('p', { class: 'fine' }, 'Connected. You can sign in with Continue with Google.') : h('div', { class: 'formrow' }, connectGoogle, gmsg), ghint),
     h('div', { class: 'group' }, h('h3', {}, 'Where you are signed in'), sessionsBox, h('div', { class: 'formrow' }, others)),
     h('div', { class: 'group' }, h('h3', {}, 'Sign-in screen'), h('label', { class: 'switch' }, guestBox, 'Offer the button Continue without signing in'), h('p', { class: 'fine' }, 'Anyone who can open this window can then use it as a guest, without an account. Turn it off to require a sign-in every time. Guests cannot see or change any account.')),
     h('div', { class: 'group' }, h('h3', {}, 'How your account is protected'), h('p', { class: 'fine' }, 'Passwords are stored only as a salted scrypt hash. After five wrong tries an account is locked for a while. A session lasts 30 days and lives in a cookie that scripts cannot read and other websites cannot use. The window only talks to this computer.')),
@@ -2085,6 +2113,10 @@ $('authForm').addEventListener('submit', async (ev) => {
   } finally {
     $('authGo').disabled = false;
   }
+});
+$('googleGo').addEventListener('click', async () => {
+  authError('');
+  try { const user = await googleSignIn($('googleHint')); if (user && !$('auth').hidden) enterApp(user); } catch (err) { $('googleHint').hidden = true; authError(err.message); }
 });
 $('guestGo').addEventListener('click', async () => {
   $('guestGo').disabled = true;

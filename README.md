@@ -35,6 +35,17 @@ UltraClaude opens as many Claude Code sessions as you want for the same project 
   <img src="docs/features.svg" alt="Roles, one shared memory, agents that talk, a map of every chat, Ctrl+V for screenshots, a prompt that stays put" width="100%">
 </p>
 
+## Sign in with Google
+
+The sign-in screen has **Continue with Google**. Google only allows this for an app that is registered with it, so set it up once (about five minutes, free):
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/apis/credentials) and create a project.
+2. *OAuth consent screen*: choose **External**, give it a name and your email. While it is in *Testing*, add the Google accounts that may sign in under **Test users** (or publish it).
+3. *Credentials → Create credentials → OAuth client ID*, type **Desktop app**. Download the JSON.
+4. Save that file as `google.json` in UltraClaude's folder in your home directory: `~/.ultraclaude/google.json` (Windows: `C:\\Users\\<you>\\.ultraclaude\\google.json`). No restart needed.
+
+UltraClaude asks Google only for your name and email address. A Google sign-in makes its own account on your computer. If you already have an account with the same email, sign in with your password first and choose **Connect Google** under *Settings → Security*.
+
 ## Updating
 
 When a new version is out, UltraClaude shows **New update available** in the sidebar and under *Settings → About*. Press **Update now**, then **Restart now**. Installed before version 0.2.0? Run this once, then `ultraclaude` (Windows PowerShell: `ultraclaude.cmd`) again in each project:

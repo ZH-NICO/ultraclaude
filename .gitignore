@@ -1,3 +1,5 @@
 node_modules/
 .ultraclaude/
 *.log
+google.json
+client_secret*.json

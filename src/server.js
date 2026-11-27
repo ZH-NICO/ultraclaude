@@ -16,6 +16,7 @@ import { codeVersion } from './version.js';
 import { handleMcp } from './mcp.js';
 import { loadConfig, HOME_DIR } from './config.js';
 import { Accounts, AuthError } from './accounts.js';
+import { Google } from './google.js';
 import { usageReport } from './usage.js';
 import { Guard } from './guard.js';
 import * as git from './git.js';
@@ -99,9 +100,10 @@ function knownToObsidian(dir) {
   }
 }
 
-export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false, usersFile = path.join(HOME_DIR, 'users.json') } = {}) {
+export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaultPath, autoExit = false, usersFile = path.join(HOME_DIR, 'users.json'), googleFetch = fetch, googleFiles = [path.join(path.dirname(usersFile), 'google.json'), path.join(ROOT, 'google.json')] } = {}) {
   const project = new Project({ dir, vaultPath });
   const accounts = new Accounts(usersFile);
+  const google = new Google({ accounts, files: googleFiles, get: googleFetch });
   const token = crypto.randomBytes(18).toString('hex'); // in the window's address; every API call needs it
   const cliKey = crypto.randomBytes(18).toString('hex'); // only in server.json, so only the command line can stop or restart the server
   const sessionOf = (req) => accounts.fromCookie(req.headers.cookie, COOKIE);
@@ -149,12 +151,25 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
     const signedIn = (user) => { const s = accounts.start(user, meta); return { cookie: cookie(s.token, s.maxAge) }; };
     if (route === 'GET /api/auth/me') {
       const who = sessionOf(req);
-      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), guestAllowed: accounts.allowGuest, version });
+      return send(res, 200, { user: who ? accounts.publicUser(who.user) : null, accounts: accounts.count(), guestAllowed: accounts.allowGuest, google: !!google.config(), version });
     }
     if (route === 'POST /api/auth/guest') {
       accounts.brake('guest');
       const g = accounts.startGuest(meta);
       return send(res, 200, { user: accounts.publicUser(accounts.guestUser) }, { 'set-cookie': cookie(g.token, g.maxAge) });
+    }
+    if (route === 'POST /api/auth/google/start') {
+      accounts.brake('google');
+      const mine = sessionOf(req);
+      return send(res, 200, google.start({ port: server.address().port, link: mine && !mine.user.guest ? mine.user : null }));
+    }
+    if (route === 'POST /api/auth/google/finish') {
+      const r = google.finish(String(body.handle || ''));
+      if (r.pending) return send(res, 200, { pending: true });
+      const mine = sessionOf(req);
+      // connecting from the settings keeps the session; signing in opens one
+      const headers = r.link && mine?.user === r.user ? {} : { 'set-cookie': signedIn(r.user).cookie };
+      return send(res, 200, { user: accounts.publicUser(r.user) }, headers);
     }
     if (route === 'POST /api/auth/signup') {
       accounts.brake('signup');
@@ -431,6 +446,13 @@ export async function startServer({ dir, port = 0, vaultPath = loadConfig().vaul
         const body = await readBody(req);
         const out = parts[0] === 'hook' ? project.handleHook(parts[2], body) : parts[2] === 'brain' ? brainChat.mcp(body) : handleMcp(project, parts[2], body);
         return out ? send(res, 200, out) : send(res, parts[0] === 'mcp' ? 202 : 200);
+      }
+      if (url.pathname === '/auth/google/callback' && req.method === 'GET') {
+        // Google sends the browser here. No address token: the one-time state is what proves this sign-in was started here.
+        const r = await google.callback(url.searchParams);
+        const text = String(r.message).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+        res.writeHead(r.ok ? 200 : 400, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...SECURITY });
+        return res.end(`<!doctype html><meta charset="utf-8"><title>UltraClaude</title><body style="margin:0;height:100vh;display:grid;place-items:center;background:#000;color:#fff;font:16px system-ui;text-align:center;padding:24px"><div><h1 style="font-size:22px">${r.ok ? 'Signed in' : 'Not signed in'}</h1><p>${text}</p></div>`);
       }
       if (parts[0] === 'api') {
         if (url.pathname === '/api/ping') return send(res, 200, { ok: true, dir: project.dir, version });
